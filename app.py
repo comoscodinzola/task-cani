@@ -63,7 +63,6 @@ tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 
 with tab1:
     if not df_task.empty:
-        # Paginazione
         if 'page' not in st.session_state: st.session_state.page = 1
         per_page = 10
         total_p = math.ceil(len(df_task) / per_page)
@@ -84,7 +83,6 @@ with tab1:
             hide_index=True, use_container_width=True, key="main_task_editor", row_height=35
         )
 
-        # Navigazione Pagine
         cp1, cp2, cp3, cp4, cp5 = st.columns([2, 1, 1, 1, 2])
         with cp2:
             if st.button("❮", disabled=(st.session_state.page == 1)):
@@ -97,7 +95,6 @@ with tab1:
                 st.session_state.page += 1
                 st.rerun()
 
-        # Dettagli Task
         selection = edited[edited["📂"] == True]
         if not selection.empty:
             for idx in selection.index:
@@ -106,16 +103,20 @@ with tab1:
                 with st.expander(f"⚙️ GESTIONE: {task['Titolo']}", expanded=True):
                     col_l, col_r = st.columns([3, 1.5])
                     with col_l:
-                        # Gestione Link
-                        raw_link = str(task["Link"]) if task["Link"] else ""
-                        if raw_link.startswith("http"):
-                            st.link_button("🚀 Vai al Link", raw_link, use_container_width=True)
+                        # --- NUOVI CAMPI MODIFICABILI ---
+                        new_titolo = st.text_input("Modifica Titolo:", value=task["Titolo"], key=f"edit_tit_{tid}")
+                        new_link = st.text_input("Modifica Link:", value=str(task["Link"]) if task["Link"] else "", key=f"edit_link_{tid}")
+                        
+                        if new_link.startswith("http"):
+                            st.link_button("🚀 Vai al Link attuale", new_link, use_container_width=True)
                         
                         new_testo = st.text_area("Contenuto:", value=task["Contenuto"], key=f"t_{tid}")
                         
                         b1, b2 = st.columns(2)
                         if b1.button("💾 Salva Modifiche", key=f"s_{tid}", type="primary", use_container_width=True):
-                            run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_testo, tid))
+                            # Update esteso con Titolo e Link
+                            run_query("UPDATE tasks SET Titolo = ?, Link = ?, Contenuto = ? WHERE ID = ?", 
+                                      (new_titolo, new_link, new_testo, tid))
                             st.rerun()
                         
                         if b2.button("🗑️ ELIMINA RECORD", key=f"del_{tid}", use_container_width=True):
