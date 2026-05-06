@@ -4,73 +4,82 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Social Task Manager", layout="wide")
 
-# --- DATABASE INIZIALIZZAZIONE ---
+# --- INIZIALIZZAZIONE DATABASE ---
 COLONNE = ["ID", "Data Prevista", "Canali", "Contenuto", "Foto_Nome", "Foto_Bytes", "Assegnato a", "Stato", "Completato da", "Data Fine"]
 
-if 'db_task' not in st.session_state or not all(col in st.session_state.db_task.columns for col in COLONNE):
+if 'db_task' not in st.session_state:
     st.session_state.db_task = pd.DataFrame(columns=COLONNE)
+
+# --- FUNZIONE DI GENERAZIONE E RESET ---
+def genera_e_reset():
+    # Recuperiamo i dati dai widget tramite session_state
+    testo = st.session_state.input_testo
+    canali = st.session_state.input_canali
+    foto = st.session_state.input_foto
+    assegnati = st.session_state.input_assegnati
+    
+    if not testo or not canali:
+        st.error("Inserisci almeno il testo e un canale!")
+        return
+
+    nuovi_task = []
+    current_date = st.session_state.input_data_inizio
+    data_fine = st.session_state.input_data_fine
+    frequenza = st.session_state.input_frequenza
+    
+    foto_bytes = foto.getvalue() if foto else None
+    foto_nome = foto.name if foto else "Nessuna foto"
+    canali_str = ", ".join(canali)
+    persone_str = ", ".join(assegnati)
+    
+    start_id = st.session_state.db_task["ID"].max() + 1 if not st.session_state.db_task.empty else 1
+    
+    temp_date = current_date
+    while temp_date <= data_fine:
+        nuovi_task.append({
+            "ID": int(start_id),
+            "Data Prevista": temp_date,
+            "Canali": canali_str,
+            "Contenuto": testo,
+            "Foto_Nome": foto_nome,
+            "Foto_Bytes": foto_bytes,
+            "Assegnato a": persone_str,
+            "Stato": "🔴 Da fare",
+            "Completato da": "-",
+            "Data Fine": "-"
+        })
+        temp_date += timedelta(days=frequenza)
+        start_id += 1
+    
+    # Aggiunta al Database
+    st.session_state.db_task = pd.concat([st.session_state.db_task, pd.DataFrame(nuovi_task)], ignore_index=True)
+    
+    # RESET dei campi: ora Streamlit lo accetta perché siamo dentro un callback
+    st.session_state.input_testo = ""
+    st.session_state.input_canali = []
+    st.session_state.input_assegnati = []
+    st.toast("Piano generato con successo!")
 
 st.title("📅 Programmatore Task & Post")
 
 # --- SIDEBAR: CREAZIONE ---
 st.sidebar.header("🚀 Crea Nuovo Piano")
 
-# Widget con chiavi associate
-testo_post = st.sidebar.text_area("Testo del Post", key="input_testo")
-foto = st.sidebar.file_uploader("Carica Foto", type=['png', 'jpg', 'jpeg'], key="input_foto")
+st.sidebar.text_area("Testo del Post", key="input_testo")
+st.sidebar.file_uploader("Carica Foto", type=['png', 'jpg', 'jpeg'], key="input_foto")
 
 canali_opzioni = ["Facebook", "Instagram", "Stato WhatsApp", "Gruppi WhatsApp", "Community WhatsApp"]
-canali_scelti = st.sidebar.multiselect("Canali di pubblicazione:", canali_opzioni, key="input_canali")
+st.sidebar.multiselect("Canali di pubblicazione:", canali_opzioni, key="input_canali")
 
-data_inizio = st.sidebar.date_input("Inizio", datetime.now())
-data_fine = st.sidebar.date_input("Fine", datetime.now() + timedelta(days=30))
-frequenza = st.sidebar.number_input("Ogni quanti giorni?", min_value=1, value=7)
+st.sidebar.date_input("Inizio", datetime.now(), key="input_data_inizio")
+st.sidebar.date_input("Fine", datetime.now() + timedelta(days=30), key="input_data_fine")
+st.sidebar.number_input("Ogni quanti giorni?", min_value=1, value=7, key="input_frequenza")
 
 nomi_team = ["Persona A", "Persona B", "Persona C", "Marco", "Giulia"]
-assegnati = st.sidebar.multiselect("Assegna a:", nomi_team, key="input_assegnati")
+st.sidebar.multiselect("Assegna a:", nomi_team, key="input_assegnati")
 
-if st.sidebar.button("Genera Piano Editoriale"):
-    if not testo_post or not canali_scelti:
-        st.sidebar.error("Inserisci almeno il testo e un canale!")
-    else:
-        nuovi_task = []
-        current_date = data_inizio
-        foto_bytes = foto.getvalue() if foto else None
-        foto_nome = foto.name if foto else "Nessuna foto"
-        canali_str = ", ".join(canali_scelti)
-        persone_str = ", ".join(assegnati)
-        
-        start_id = st.session_state.db_task["ID"].max() + 1 if not st.session_state.db_task.empty else 1
-        
-        temp_date = current_date
-        while temp_date <= data_fine:
-            nuovi_task.append({
-                "ID": int(start_id),
-                "Data Prevista": temp_date,
-                "Canali": canali_str,
-                "Contenuto": testo_post,
-                "Foto_Nome": foto_nome,
-                "Foto_Bytes": foto_bytes,
-                "Assegnato a": persone_str,
-                "Stato": "🔴 Da fare",
-                "Completato da": "-",
-                "Data Fine": "-"
-            })
-            temp_date += timedelta(days=frequenza)
-            start_id += 1
-        
-        # Aggiunta al Database
-        st.session_state.db_task = pd.concat([st.session_state.db_task, pd.DataFrame(nuovi_task)], ignore_index=True)
-        
-        # --- RESET PULITO DEI CAMPI ---
-        # Invece di chiamare una funzione, svuotiamo le chiavi direttamente qui
-        st.session_state.input_testo = ""
-        st.session_state.input_canali = []
-        st.session_state.input_assegnati = []
-        # Per i file uploader il reset è più complesso, Streamlit lo gestirà al prossimo rerun
-        
-        st.success("Piano generato!")
-        st.rerun()
+# Usiamo on_click per chiamare la funzione che genera e resetta
+st.sidebar.button("Genera Piano Editoriale", on_click=genera_e_reset)
 
 # --- AREA PRINCIPALE ---
 st.header("📋 Elenco Task")
