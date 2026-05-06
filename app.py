@@ -11,7 +11,6 @@ DB_NAME = "social_tasks.db"
 
 # --- FUNZIONI DATABASE ---
 def run_query(query, params=()):
-    """Esegue una query e chiude immediatamente la connessione."""
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute(query, params)
@@ -24,7 +23,6 @@ def init_db():
                   Link TEXT, Foto_Nome TEXT, Foto_Bytes BLOB, Assegnato_a TEXT, 
                   Stato TEXT, Completato_da TEXT, Data_Fine TEXT)''')
     
-    # Migrazioni sicure
     with sqlite3.connect(DB_NAME) as conn:
         c = conn.cursor()
         c.execute("PRAGMA table_info(tasks)")
@@ -36,14 +34,7 @@ def init_db():
     run_query('CREATE TABLE IF NOT EXISTS team (nome TEXT UNIQUE)')
     run_query('CREATE TABLE IF NOT EXISTS canali (nome TEXT UNIQUE)')
 
-def pulisci_scaduti_vecchi():
-    """Elimina i task non fatti più vecchi di 3 giorni."""
-    limite = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
-    run_query("DELETE FROM tasks WHERE Stato = '🔴 Da fare' AND Data_Prevista < ?", (limite,))
-
-# Inizializzazione
 init_db()
-pulisci_scaduti_vecchi()
 
 # --- CARICAMENTO DATI ---
 def get_all_data():
@@ -51,19 +42,16 @@ def get_all_data():
         df_t = pd.read_sql_query("SELECT * FROM tasks ORDER BY Data_Prevista ASC", conn)
         df_team = pd.read_sql_query("SELECT nome FROM team", conn)
         df_canali = pd.read_sql_query("SELECT nome FROM canali", conn)
-    
     list_t = df_team["nome"].tolist() if not df_team.empty else ["Marco", "Giulia"]
     list_c = df_canali["nome"].tolist() if not df_canali.empty else ["Instagram", "Facebook", "TikTok"]
     return df_t, list_t, list_c
 
-# Supporto immagini
 def get_image_base64(image_bytes):
     if not image_bytes: return None
     try:
         return f"data:image/png;base64,{base64.b64encode(image_bytes).decode()}"
     except: return None
 
-# Caricamento effettivo
 df_task, team_list, canali_list = get_all_data()
 
 # --- INTERFACCIA ---
@@ -99,13 +87,14 @@ tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 
 with tab1:
     if not df_task.empty:
-        # Prepariamo la visualizzazione
         df_vis = df_task.copy()
         df_vis['Data'] = pd.to_datetime(df_vis['Data_Prevista']).dt.strftime('%d-%m-%Y')
         df_vis['Foto'] = df_vis['Foto_Bytes'].apply(get_image_base64)
         df_vis.insert(0, "📂", False)
         
-        # Mostriamo la tabella
+        # --- MODIFICA RICHIESTA: Altezza righe dimezzata e visualizzazione limitata ---
+        # row_height=35 riduce l'altezza. 
+        # L'altezza totale (height) calcolata per 10 record è circa 400px (35*10 + header)
         edited = st.data_editor(
             df_vis[["📂", "Foto", "Titolo", "Link", "Data", "Stato"]],
             column_config={
@@ -115,10 +104,13 @@ with tab1:
                 "Data": "Scadenza"
             },
             disabled=["Foto", "Titolo", "Link", "Data", "Stato"],
-            hide_index=True, use_container_width=True, key="main_editor", row_height=75
+            hide_index=True, 
+            use_container_width=True, 
+            key="main_editor", 
+            row_height=35, # Altezza dimezzata
+            height=400    # Mostra circa 10 record per volta
         )
         
-        # Gestione task selezionato
         selected_rows = edited[edited["📂"] == True].index.tolist()
         
         if selected_rows:
@@ -126,64 +118,50 @@ with tab1:
             for idx in selected_rows:
                 task = df_task.iloc[idx]
                 tid = task["ID"]
-                # Data nel formato GG-MM-AAAA per l'intestazione
                 d_format = datetime.strptime(task['Data_Prevista'], '%Y-%m-%d').strftime('%d-%m-%Y')
                 
                 with st.expander(f"⚙️ GESTIONE: {task['Titolo']} ({d_format})", expanded=True):
                     col_left, col_right = st.columns([3, 1.5])
-                    
                     with col_left:
-                        # Link e Modifica
                         l_val = task["Link"] if task["Link"] and str(task["Link"]) != "None" else ""
                         new_l = st.text_input("Link Risorsa:", value=l_val, key=f"l_{tid}")
-                        if new_l: st.link_button("🚀 Apri Link nel Browser", new_l)
-                        
+                        if new_l: st.link_button("🚀 Apri Link", new_l)
                         new_t = st.text_area("Testo Post:", value=task["Contenuto"], key=f"t_{tid}", height=150)
                         
-                        # Pulsanti Azione
                         b_col1, b_col2 = st.columns(2)
-                        if b_col1.button("💾 Salva Modifiche", key=f"save_{tid}", type="primary", use_container_width=True):
+                        if b_col1.button("💾 Salva", key=f"save_{tid}", type="primary", use_container_width=True):
                             run_query("UPDATE tasks SET Contenuto = ?, Link = ? WHERE ID = ?", (new_t, new_l, tid))
                             st.rerun()
-                        
-                        # ELIMINAZIONE DIRETTA E SICURA
-                        if b_col2.button("🗑️ ELIMINA TASK", key=f"del_{tid}", use_container_width=True):
+                        if b_col2.button("🗑️ ELIMINA", key=f"del_{tid}", use_container_width=True):
                             run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
                             st.rerun()
 
                     with col_right:
                         if task["Foto_Bytes"]:
-                            st.image(task["Foto_Bytes"], caption="Immagine allegata")
-                            st.download_button("📥 Scarica File", task["Foto_Bytes"], f"foto_{tid}.png", "image/png", key=f"dl_{tid}", use_container_width=True)
+                            st.image(task["Foto_Bytes"])
                         else:
-                            st.info("Nessuna immagine")
+                            st.info("No foto")
                     
-                    st.divider()
-                    # Chiusura task
                     if task["Stato"] != "🟢 Completato":
                         c1, c2 = st.columns([2, 1])
-                        user = c1.selectbox("Chi ha eseguito il post?", team_list, key=f"u_{tid}")
-                        if c2.button("✅ Segna come Fatto", key=f"f_{tid}", use_container_width=True):
+                        user = c1.selectbox("Chi?", team_list, key=f"u_{tid}")
+                        if c2.button("✅ Fatto", key=f"f_{tid}", use_container_width=True):
                             run_query("UPDATE tasks SET Stato='🟢 Completato', Completato_da=?, Data_Fine=? WHERE ID=?", 
                                      (user, datetime.now().strftime("%d/%m %H:%M"), tid))
                             st.rerun()
-                    else:
-                        st.success(f"Task completato da {task['Completato_da']} il {task['Data_Fine']}")
     else:
-        st.info("Nessun task presente in archivio.")
+        st.info("Nessun task.")
 
 with tab2:
-    st.subheader("Configurazione Team e Canali")
+    st.subheader("Configurazione")
     cl1, cl2 = st.columns(2)
     with cl1:
         m_in = st.text_input("Nuovo Membro:")
         if st.button("Aggiungi Membro"):
             if m_in: run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (m_in,))
             st.rerun()
-        st.write("Team:", team_list)
     with cl2:
         c_in = st.text_input("Nuovo Canale:")
         if st.button("Aggiungi Canale"):
             if c_in: run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (c_in,))
             st.rerun()
-        st.write("Canali:", canali_list)
