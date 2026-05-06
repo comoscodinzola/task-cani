@@ -27,7 +27,6 @@ def init_db():
                   Link TEXT, Foto_Nome TEXT, Foto_Bytes BLOB, Assegnato_a TEXT, 
                   Stato TEXT, Completato_da TEXT, Data_Fine TEXT)''')
     
-    # Migrazioni sicure per aggiungere colonne se non esistono
     c.execute("PRAGMA table_info(tasks)")
     existing_cols = [col[1] for col in c.fetchall()]
     migrazioni = [("Titolo", "TEXT DEFAULT 'Senza Titolo'"), ("Link", "TEXT"), ("Assegnato_a", "TEXT")]
@@ -48,8 +47,16 @@ def run_query(query, params=()):
         c.execute(query, params)
         conn.commit()
 
-# Inizializzazione Database
+# --- PULIZIA AUTOMATICA TASK SCADUTI (DOPO 3 GIORNI) ---
+def pulisci_scaduti_vecchi():
+    # Calcola la data di 3 giorni fa
+    limite_cancellazione = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    # Elimina i task non completati che sono più vecchi di 3 giorni
+    run_query("DELETE FROM tasks WHERE Stato = '🔴 Da fare' AND Data_Prevista < ?", (limite_cancellazione,))
+
+# Inizializzazione
 init_db()
+pulisci_scaduti_vecchi() # Eseguita ad ogni refresh dell'app
 
 # --- CARICAMENTO DATI ---
 def get_all_data():
@@ -135,14 +142,12 @@ with tab1:
                 with st.expander(f"📦 MODIFICA TASK: {task['Titolo']} ({task['Data_Prevista']})", expanded=True):
                     c1, c2 = st.columns([3, 1])
                     with c1:
-                        # Campo Link: popolato dal DB
                         st.text_input(
                             "🔗 Link (URL):", 
                             value=task["Link"] if task["Link"] else "", 
                             key=f"exp_link_{tid}"
                         )
                         
-                        # Campo Testo: popolato dal DB
                         st.text_area(
                             "📝 Testo:", 
                             value=task["Contenuto"], 
@@ -151,14 +156,9 @@ with tab1:
                         )
                         
                         if st.button("💾 Salva Modifiche", key=f"save_btn_{tid}", type="primary"):
-                            # Recupero sicuro dallo session_state
                             nuovo_link = st.session_state[f"exp_link_{tid}"]
                             nuovo_testo = st.session_state[f"exp_txt_{tid}"]
-                            
-                            run_query(
-                                "UPDATE tasks SET Contenuto = ?, Link = ? WHERE ID = ?", 
-                                (nuovo_testo, nuovo_link, tid)
-                            )
+                            run_query("UPDATE tasks SET Contenuto = ?, Link = ? WHERE ID = ?", (nuovo_testo, nuovo_link, tid))
                             st.success("Modifiche salvate!")
                             st.rerun()
                             
@@ -167,7 +167,6 @@ with tab1:
                             st.image(task["Foto_Bytes"], caption="Immagine")
                     
                     st.divider()
-                    # Azioni di Stato
                     ca1, ca2, ca3 = st.columns([2, 2, 1])
                     if task["Stato"] != "🟢 Completato":
                         user = ca1.selectbox("Chi completa?", team_list, key=f"u_{tid}")
