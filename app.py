@@ -11,8 +11,10 @@ if 'db_task' not in st.session_state:
     st.session_state.db_task = pd.DataFrame(columns=COLONNE)
 
 if 'team' not in st.session_state:
-    # Team iniziale di default
-    st.session_state.team = ["Marco", "Giulia", "Persona A"]
+    st.session_state.team = ["Marco", "Giulia"]
+
+if 'canali_opzioni' not in st.session_state:
+    st.session_state.canali_opzioni = ["Facebook", "Instagram", "Stato WhatsApp", "Gruppi WhatsApp"]
 
 # --- FUNZIONI DI SERVIZIO ---
 def genera_e_reset():
@@ -68,20 +70,19 @@ st.sidebar.header("🚀 Crea Nuovo Piano")
 st.sidebar.text_area("Testo del Post", key="input_testo")
 st.sidebar.file_uploader("Carica Foto", type=['png', 'jpg', 'jpeg'], key="input_foto")
 
-canali_opzioni = ["Facebook", "Instagram", "Stato WhatsApp", "Gruppi WhatsApp", "Community WhatsApp"]
-st.sidebar.multiselect("Canali di pubblicazione:", canali_opzioni, key="input_canali")
+# Canali dinamici presi dallo session_state
+st.sidebar.multiselect("Canali di pubblicazione:", st.session_state.canali_opzioni, key="input_canali")
 
 st.sidebar.date_input("Inizio", datetime.now(), key="input_data_inizio")
 st.sidebar.date_input("Fine", datetime.now() + timedelta(days=30), key="input_data_fine")
 st.sidebar.number_input("Ogni quanti giorni?", min_value=1, value=7, key="input_frequenza")
 
-# Qui usiamo la lista dinamica st.session_state.team
 st.sidebar.multiselect("Assegna a:", st.session_state.team, key="input_assegnati")
 
 st.sidebar.button("Genera Piano Editoriale", on_click=genera_e_reset)
 
 # --- AREA PRINCIPALE CON TAB ---
-tab1, tab2 = st.tabs(["📋 Elenco Task", "👥 Gestione Team"])
+tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Gestione Impostazioni"])
 
 with tab1:
     if not st.session_state.db_task.empty:
@@ -108,7 +109,6 @@ with tab1:
                                 st.download_button("⬇️ Scarica Foto", task["Foto_Bytes"], file_name=task["Foto_Nome"], key=f"d_{sel_id}")
                         
                         if task["Stato"] != "🟢 Completato":
-                            # Anche qui la lista è dinamica in base al team assegnato
                             persone_previste = task["Assegnato a"].split(", ") if task["Assegnato a"] != "" else st.session_state.team
                             chi = st.selectbox("Chi lo ha fatto?", persone_previste, key=f"who_{sel_id}")
                             if st.button(f"Segna Completato #{sel_id}", key=f"btn_{sel_id}"):
@@ -122,25 +122,36 @@ with tab1:
         st.info("Configura il piano a sinistra e clicca su Genera.")
 
 with tab2:
-    st.header("👥 Gestione Membri Team")
+    col1, col2 = st.columns(2)
     
-    col_a, col_b = st.columns(2)
-    
-    with col_a:
-        nuovo_membro = st.text_input("Nome nuovo collaboratore:")
-        if st.button("Aggiungi al Team"):
+    with col1:
+        st.header("👥 Team")
+        nuovo_membro = st.text_input("Nome nuovo collaboratore:", key="new_mem")
+        if st.button("Aggiungi Collaboratore"):
             if nuovo_membro and nuovo_membro not in st.session_state.team:
                 st.session_state.team.append(nuovo_membro)
-                st.success(f"{nuovo_membro} aggiunto!")
                 st.rerun()
-    
-    with col_b:
-        st.write("**Membri attuali:**")
+        
         for m in st.session_state.team:
-            c1, c2 = st.columns([3, 1])
-            c1.write(f"- {m}")
-            if c2.button("Elimina", key=f"del_{m}"):
+            ca, cb = st.columns([3, 1])
+            ca.write(f"- {m}")
+            if cb.button("Elimina", key=f"del_m_{m}"):
                 st.session_state.team.remove(m)
+                st.rerun()
+
+    with col2:
+        st.header("📢 Canali")
+        nuovo_canale = st.text_input("Nome nuovo canale (es. TikTok):", key="new_chan")
+        if st.button("Aggiungi Canale"):
+            if nuovo_canale and nuovo_canale not in st.session_state.canali_opzioni:
+                st.session_state.canali_opzioni.append(nuovo_canale)
+                st.rerun()
+        
+        for c in st.session_state.canali_opzioni:
+            ca, cb = st.columns([3, 1])
+            ca.write(f"- {c}")
+            if cb.button("Elimina", key=f"del_c_{c}"):
+                st.session_state.canali_opzioni.remove(c)
                 st.rerun()
 
 st.divider()
