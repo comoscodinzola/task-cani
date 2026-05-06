@@ -4,26 +4,18 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Social Task Manager", layout="wide")
 
-# --- DATABASE E CHIAVI DI RESET ---
+# --- DATABASE INIZIALIZZAZIONE ---
 COLONNE = ["ID", "Data Prevista", "Canali", "Contenuto", "Foto_Nome", "Foto_Bytes", "Assegnato a", "Stato", "Completato da", "Data Fine"]
 
 if 'db_task' not in st.session_state or not all(col in st.session_state.db_task.columns for col in COLONNE):
     st.session_state.db_task = pd.DataFrame(columns=COLONNE)
-
-# Funzione per svuotare i campi della sidebar
-def reset_form():
-    st.session_state["input_testo"] = ""
-    st.session_state["input_foto"] = None
-    st.session_state["input_canali"] = []
-    st.session_state["input_assegnati"] = []
-    # Nota: le date e l'intervallo tornano ai default automaticamente al rerun
 
 st.title("📅 Programmatore Task & Post")
 
 # --- SIDEBAR: CREAZIONE ---
 st.sidebar.header("🚀 Crea Nuovo Piano")
 
-# Usiamo le 'key' per permettere il reset automatico
+# Widget con chiavi associate
 testo_post = st.sidebar.text_area("Testo del Post", key="input_testo")
 foto = st.sidebar.file_uploader("Carica Foto", type=['png', 'jpg', 'jpeg'], key="input_foto")
 
@@ -67,13 +59,18 @@ if st.sidebar.button("Genera Piano Editoriale"):
             temp_date += timedelta(days=frequenza)
             start_id += 1
         
-        # Aggiunta al DB
+        # Aggiunta al Database
         st.session_state.db_task = pd.concat([st.session_state.db_task, pd.DataFrame(nuovi_task)], ignore_index=True)
         
-        # --- LOGICA DI RESET ---
-        reset_form()
-        st.success("Piano generato e campi svuotati!")
-        st.rerun() # Riavvia l'app per mostrare i campi puliti e la tabella aggiornata
+        # --- RESET PULITO DEI CAMPI ---
+        # Invece di chiamare una funzione, svuotiamo le chiavi direttamente qui
+        st.session_state.input_testo = ""
+        st.session_state.input_canali = []
+        st.session_state.input_assegnati = []
+        # Per i file uploader il reset è più complesso, Streamlit lo gestirà al prossimo rerun
+        
+        st.success("Piano generato!")
+        st.rerun()
 
 # --- AREA PRINCIPALE ---
 st.header("📋 Elenco Task")
