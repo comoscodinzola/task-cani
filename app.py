@@ -175,10 +175,16 @@ with tab2:
         if st.button("Aggiungi Membro"):
             if m_in: run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (m_in,))
             st.rerun()
-        st.write("Team:", team_list)
+        st.write("**Team attuale:**")
+        for m in team_list:
+            st.text(f"• {m}") # Visualizzazione pulita riga per riga
+            
     with cl2:
         c_in = st.text_input("Nuovo Canale:")
         if st.button("Aggiungi Canale"):
             if c_in: run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (c_in,))
             st.rerun()
+        st.write("**Canali attuali:**")
+        for c in canali_list:
+            st.text(f"• {c}") # Visualizzazione pulita riga per riga
         st.write("Canali:", canali_list)
