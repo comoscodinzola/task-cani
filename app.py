@@ -11,11 +11,19 @@ DB_NAME = "social_tasks.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # AGGIORNATO: Aggiunta colonna Titolo
     c.execute('''CREATE TABLE IF NOT EXISTS tasks
                  (ID INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  Data_Prevista TEXT, Canali TEXT, Contenuto TEXT, 
+                  Titolo TEXT, Data_Prevista TEXT, Canali TEXT, Contenuto TEXT, 
                   Foto_Nome TEXT, Foto_Bytes BLOB, Assegnato_a TEXT, 
                   Stato TEXT, Completato_da TEXT, Data_Fine TEXT)''')
+    
+    # Controllo se la colonna Titolo esiste (per database già creati precedentemente)
+    c.execute("PRAGMA table_info(tasks)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'Titolo' not in columns:
+        c.execute("ALTER TABLE tasks ADD COLUMN Titolo TEXT DEFAULT 'Senza Titolo'")
+        
     c.execute('CREATE TABLE IF NOT EXISTS team (nome TEXT UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS canali (nome TEXT UNIQUE)')
     
@@ -32,7 +40,6 @@ def init_db():
 
 def load_data(table):
     conn = sqlite3.connect(DB_NAME)
-    # MODIFICA: Aggiunto ORDER BY per garantire l'ordine cronologico crescente
     if table == "tasks":
         df = pd.read_sql_query(f"SELECT * FROM {table} ORDER BY Data_Prevista ASC, ID ASC", conn)
     else:
@@ -56,6 +63,7 @@ canali_list = load_data("canali")["nome"].tolist()
 
 # --- FUNZIONI LOGICA ---
 def genera_piano():
+    titolo = st.session_state.input_titolo # Nuovo campo
     testo = st.session_state.input_testo
     inizio = st.session_state.input_data_inizio
     fine = st.session_state.input_data_fine
@@ -64,8 +72,8 @@ def genera_piano():
     canali = ", ".join(st.session_state.input_canali) if st.session_state.input_canali else "Generico"
     foto = st.session_state.input_foto
     
-    if not testo.strip() or not assegnati:
-        st.error("Compila i campi obbligatori!")
+    if not testo.strip() or not assegnati or not titolo.strip():
+        st.error("Compila i campi obbligatori (Titolo, Testo, Assegnatario)!")
         return
 
     foto_bytes = foto.getvalue() if foto else None
@@ -75,13 +83,13 @@ def genera_piano():
     temp_date = inizio
     while temp_date <= fine:
         conn.execute('''INSERT INTO tasks 
-            (Data_Prevista, Canali, Contenuto, Foto_Nome, Foto_Bytes, Assegnato_a, Stato, Completato_da, Data_Fine) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (temp_date.strftime("%Y-%m-%d"), canali, testo, foto_nome, foto_bytes, assegnati, "🔴 Da fare", "-", "-"))
+            (Titolo, Data_Prevista, Canali, Contenuto, Foto_Nome, Foto_Bytes, Assegnato_a, Stato, Completato_da, Data_Fine) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (titolo, temp_date.strftime("%Y-%m-%d"), canali, testo, foto_nome, foto_bytes, assegnati, "🔴 Da fare", "-", "-"))
         temp_date += timedelta(days=frequenza)
     conn.commit()
     conn.close()
-    st.toast("Piano generato con successo!")
+    st.toast(f"Piano '{titolo}' generato!")
 
 # --- INTERFACCIA ---
 st.title("📅 Social Manager Pro")
@@ -89,6 +97,7 @@ st.title("📅 Social Manager Pro")
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🚀 Crea Programmazione")
+    st.text_input("Titolo del Piano *", key="input_titolo", placeholder="es. Lancio Prodotto X")
     st.text_area("Testo del Post *", key="input_testo")
     st.file_uploader("Carica Immagine", type=['png', 'jpg', 'jpeg'], key="input_foto")
     st.multiselect("Social Media:", canali_list, key="input_canali")
@@ -109,19 +118,20 @@ t1, t2 = st.tabs(["📋 Elenco Attività", "⚙️ Configurazione"])
 with t1:
     if not df_task.empty:
         df_vis = df_task.copy()
-        # Visualizzazione data nel formato GG-MM-AAAA
         df_vis['Data_Prevista'] = pd.to_datetime(df_vis['Data_Prevista']).dt.strftime('%d-%m-%Y')
         
-        st.write("### 📝 Task in programma (Ordine Cronologico)")
+        st.write("### 📝 Task in programma")
         df_vis.insert(0, "Seleziona", False)
         
-        col_show = ["Seleziona", "ID", "Data_Prevista", "Stato", "Canali", "Assegnato_a"]
+        # AGGIORNATO: Aggiunta colonna Titolo nella visualizzazione
+        col_show = ["Seleziona", "ID", "Titolo", "Data_Prevista", "Stato", "Canali"]
         
         edited = st.data_editor(
             df_vis[col_show],
             column_config={
                 "Seleziona": st.column_config.CheckboxColumn("Gestisci"),
-                "Data_Prevista": "Data Scadenza",
+                "Titolo": st.column_config.TextColumn("Titolo", width="medium"),
+                "Data_Prevista": "Scadenza",
                 "ID": st.column_config.NumberColumn("ID", format="%d")
             },
             disabled=[c for c in col_show if c != "Seleziona"],
@@ -136,17 +146,23 @@ with t1:
                 task = df_task[df_task["ID"] == sel_id].iloc[0]
                 data_formattata = datetime.strptime(task['Data_Prevista'], "%Y-%m-%d").strftime("%d-%m-%Y")
                 
-                with st.expander(f"📦 Task #{sel_id} del {data_formattata}", expanded=True):
+                with st.expander(f"📦 {task['Titolo']} (#{sel_id}) - {data_formattata}", expanded=True):
                     c1, c2 = st.columns([3, 2])
                     with c1:
+                        # Permettiamo di modificare il titolo
+                        new_tit = st.text_input("Modifica Titolo:", task["Titolo"], key=f"edit_tit_{sel_id}")
+                        if new_tit != task["Titolo"]:
+                            run_query("UPDATE tasks SET Titolo = ? WHERE ID = ?", (new_tit, sel_id))
+                        
                         st.info(f"**Social:** {task['Canali']} | **Chi:** {task['Assegnato_a']}")
-                        new_txt = st.text_area("Copy del post:", task["Contenuto"], key=f"ed_{sel_id}", height=150)
+                        
+                        new_txt = st.text_area("Copy del post:", task["Contenuto"], key=f"ed_txt_{sel_id}", height=120)
                         if new_txt != task["Contenuto"]:
                             run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_txt, sel_id))
                     
                     with c2:
                         if task["Foto_Bytes"]:
-                            st.image(task["Foto_Bytes"], caption=task["Foto_Nome"], use_container_width=True)
+                            st.image(task["Foto_Bytes"], use_container_width=True)
                             st.download_button("💾 Scarica", task["Foto_Bytes"], file_name=task["Foto_Nome"], key=f"dl_{sel_id}")
                     
                     st.divider()
@@ -154,7 +170,7 @@ with t1:
                     
                     if task["Stato"] != "🟢 Completato":
                         chi = col_act1.selectbox("Eseguito da:", team_list, key=f"u_{sel_id}")
-                        if col_act2.button("✅ Segna come completato", key=f"b_{sel_id}", use_container_width=True):
+                        if col_act2.button("✅ Segna completato", key=f"b_{sel_id}", use_container_width=True):
                             now_str = datetime.now().strftime("%d-%m-%Y %H:%M")
                             run_query("UPDATE tasks SET Stato='🟢 Completato', Completato_da=?, Data_Fine=? WHERE ID=?", (chi, now_str, sel_id))
                             st.rerun()
@@ -165,11 +181,11 @@ with t1:
                         run_query("DELETE FROM tasks WHERE ID = ?", (sel_id,))
                         st.rerun()
     else:
-        st.info("Nessun task programmato. Usa la sidebar per iniziare!")
+        st.info("Nessun task programmato.")
 
 with t2:
+    # (Parte Team e Canali rimane invariata)
     col_a, col_b = st.columns(2)
-    # (Codice gestione team e canali identico al precedente...)
     with col_a:
         st.subheader("👥 Team")
         with st.container(border=True):
