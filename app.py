@@ -32,7 +32,7 @@ def get_image_base64(image_bytes):
 
 df_task, team_list, canali_list = get_all_data()
 
-# --- SIDEBAR: INSERIMENTO ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("🚀 Nuovo Piano")
     titolo_in = st.text_input("Titolo *")
@@ -83,50 +83,62 @@ with tab1:
             hide_index=True, use_container_width=True, key="main_task_editor", row_height=35
         )
 
+        # Navigazione
         cp1, cp2, cp3, cp4, cp5 = st.columns([2, 1, 1, 1, 2])
         with cp2:
             if st.button("❮", disabled=(st.session_state.page == 1)):
                 st.session_state.page -= 1
                 st.rerun()
         with cp3:
-            st.markdown(f"<div style='text-align: center; background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 50%; width: 35px; height: 35px; line-height: 35px; margin: auto; font-weight: bold; color: #16a34a;'>{st.session_state.page}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: center; font-weight: bold;'>{st.session_state.page}</div>", unsafe_allow_html=True)
         with cp4:
             if st.button("❯", disabled=(st.session_state.page == total_p)):
                 st.session_state.page += 1
                 st.rerun()
 
+        # LOGICA DI SELEZIONE PERSISTENTE
         selection = edited[edited["📂"] == True]
         if not selection.empty:
-            for idx in selection.index:
-                task = df_page.loc[idx]
+            # Salviamo l'ID dell'ultima riga selezionata
+            st.session_state.selected_tid = df_page.loc[selection.index[0], "ID"]
+
+        # Se abbiamo un ID selezionato, mostriamo i dettagli
+        if "selected_tid" in st.session_state:
+            # Recuperiamo i dati aggiornati del task specifico
+            task_data = df_task[df_task["ID"] == st.session_state.selected_tid]
+            
+            if not task_data.empty:
+                task = task_data.iloc[0]
                 tid = task["ID"]
+                
                 with st.expander(f"⚙️ GESTIONE: {task['Titolo']}", expanded=True):
                     col_l, col_r = st.columns([3, 1.5])
                     with col_l:
-                        # --- NUOVI CAMPI MODIFICABILI ---
-                        new_titolo = st.text_input("Modifica Titolo:", value=task["Titolo"], key=f"edit_tit_{tid}")
-                        new_link = st.text_input("Modifica Link:", value=str(task["Link"]) if task["Link"] else "", key=f"edit_link_{tid}")
+                        # Campi di input
+                        new_tit = st.text_input("Titolo:", value=task["Titolo"], key=f"etit_{tid}")
+                        new_lnk = st.text_input("Link:", value=str(task["Link"]) if task["Link"] else "", key=f"elnk_{tid}")
+                        new_cnt = st.text_area("Contenuto:", value=task["Contenuto"], key=f"ecnt_{tid}", height=150)
                         
-                        if new_link.startswith("http"):
-                            st.link_button("🚀 Vai al Link attuale", new_link, use_container_width=True)
+                        b1, b2, b3 = st.columns([1, 1, 1])
                         
-                        new_testo = st.text_area("Contenuto:", value=task["Contenuto"], key=f"t_{tid}")
-                        
-                        b1, b2 = st.columns(2)
-                        if b1.button("💾 Salva Modifiche", key=f"s_{tid}", type="primary", use_container_width=True):
-                            # Update esteso con Titolo e Link
-                            run_query("UPDATE tasks SET Titolo = ?, Link = ?, Contenuto = ? WHERE ID = ?", 
-                                      (new_titolo, new_link, new_testo, tid))
+                        if b1.button("💾 SALVA", type="primary", use_container_width=True):
+                            run_query("UPDATE tasks SET Titolo=?, Link=?, Contenuto=? WHERE ID=?", 
+                                      (new_tit, new_lnk, new_cnt, tid))
+                            st.success("Modifiche salvate!")
                             st.rerun()
                         
-                        if b2.button("🗑️ ELIMINA RECORD", key=f"del_{tid}", use_container_width=True):
-                            run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
+                        if b2.button("🗑️ ELIMINA", use_container_width=True):
+                            run_query("DELETE FROM tasks WHERE ID=?", (tid,))
+                            del st.session_state.selected_tid
+                            st.rerun()
+                            
+                        if b3.button("✖️ CHIUDI", use_container_width=True):
+                            del st.session_state.selected_tid
                             st.rerun()
 
                     with col_r:
                         if task["Foto_Bytes"]:
                             st.image(task["Foto_Bytes"])
-                            st.download_button("📥 Scarica", task["Foto_Bytes"], f"f_{tid}.png", key=f"dl_{tid}", use_container_width=True)
     else:
         st.info("Nessun task in archivio.")
 
@@ -138,32 +150,18 @@ with tab2:
         if st.button("Aggiungi Membro"):
             if m_in: run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (m_in,))
             st.rerun()
-        st.write("**Team attuale:**")
         for m in team_list: st.text(f"• {m}")
-            
     with cl2:
         c_in = st.text_input("Nuovo Canale:")
         if st.button("Aggiungi Canale"):
             if c_in: run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (c_in,))
             st.rerun()
-        st.write("**Canali attuali:**")
         for c in canali_list: st.text(f"• {c}")
 
     st.divider()
     st.subheader("🗑️ Pulizia Massiva")
-    titolo_da_eliminare = st.text_input("Inserisci il Titolo esatto dei task da rimuovere:")
-    if st.button("Togli dal DB record con questo Titolo", type="secondary", use_container_width=True):
-        if titolo_da_eliminare:
-            with sqlite3.connect(DB_NAME) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM tasks WHERE Titolo = ?", (titolo_da_eliminare,))
-                count = cursor.fetchone()[0]
-                if count > 0:
-                    cursor.execute("DELETE FROM tasks WHERE Titolo = ?", (titolo_da_eliminare,))
-                    conn.commit()
-                    st.success(f"Eliminati correttamente {count} record.")
-                    st.rerun()
-                else:
-                    st.warning("Nessun record trovato con questo titolo.")
-        else:
-            st.error("Scrivi un titolo per procedere.")
+    tit_del = st.text_input("Titolo esatto da rimuovere:")
+    if st.button("Togli dal DB record con questo Titolo", use_container_width=True):
+        if tit_del:
+            run_query("DELETE FROM tasks WHERE Titolo = ?", (tit_del,))
+            st.rerun()
