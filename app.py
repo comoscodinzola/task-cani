@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pd
 import sqlite3
 from datetime import datetime, timedelta
 import base64
@@ -133,11 +133,14 @@ with tab1:
                 with st.expander(f"📦 MODIFICA TASK: {task['Titolo']} ({task['Data_Prevista']})", expanded=True):
                     c1, c2 = st.columns([3, 1.5])
                     with c1:
-                        st.text_input("🔗 Link (URL):", value=task["Link"] if task["Link"] else "", key=f"exp_link_{tid}")
+                        # Gestione sicura del link per evitare il TypeError
+                        current_link = task["Link"] if task["Link"] and str(task["Link"]).strip() != "" else ""
                         
-                        # Pulsante per aprire il link attivo
-                        if task["Link"]:
-                            st.link_button("🚀 Vai al Link", task["Link"], use_container_width=False)
+                        st.text_input("🔗 Link (URL):", value=current_link, key=f"exp_link_{tid}")
+                        
+                        # Mostra il pulsante solo se il link esiste ed è valido
+                        if current_link:
+                            st.link_button("🚀 Vai al Link", current_link, use_container_width=False)
                         
                         st.text_area("📝 Testo:", value=task["Contenuto"], key=f"exp_txt_{tid}", height=150)
                         
