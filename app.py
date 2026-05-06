@@ -11,14 +11,13 @@ DB_NAME = "social_tasks.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # AGGIORNATO: Aggiunta colonna Titolo
     c.execute('''CREATE TABLE IF NOT EXISTS tasks
                  (ID INTEGER PRIMARY KEY AUTOINCREMENT, 
                   Titolo TEXT, Data_Prevista TEXT, Canali TEXT, Contenuto TEXT, 
                   Foto_Nome TEXT, Foto_Bytes BLOB, Assegnato_a TEXT, 
                   Stato TEXT, Completato_da TEXT, Data_Fine TEXT)''')
     
-    # Controllo se la colonna Titolo esiste (per database già creati precedentemente)
+    # Migrazione se necessario
     c.execute("PRAGMA table_info(tasks)")
     columns = [column[1] for column in c.fetchall()]
     if 'Titolo' not in columns:
@@ -63,7 +62,7 @@ canali_list = load_data("canali")["nome"].tolist()
 
 # --- FUNZIONI LOGICA ---
 def genera_piano():
-    titolo = st.session_state.input_titolo # Nuovo campo
+    titolo = st.session_state.input_titolo
     testo = st.session_state.input_testo
     inizio = st.session_state.input_data_inizio
     fine = st.session_state.input_data_fine
@@ -73,7 +72,7 @@ def genera_piano():
     foto = st.session_state.input_foto
     
     if not testo.strip() or not assegnati or not titolo.strip():
-        st.error("Compila i campi obbligatori (Titolo, Testo, Assegnatario)!")
+        st.error("Compila i campi obbligatori!")
         return
 
     foto_bytes = foto.getvalue() if foto else None
@@ -89,7 +88,7 @@ def genera_piano():
         temp_date += timedelta(days=frequenza)
     conn.commit()
     conn.close()
-    st.toast(f"Piano '{titolo}' generato!")
+    st.toast("Piano generato!")
 
 # --- INTERFACCIA ---
 st.title("📅 Social Manager Pro")
@@ -97,18 +96,15 @@ st.title("📅 Social Manager Pro")
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🚀 Crea Programmazione")
-    st.text_input("Titolo del Piano *", key="input_titolo", placeholder="es. Lancio Prodotto X")
+    st.text_input("Titolo del Piano *", key="input_titolo")
     st.text_area("Testo del Post *", key="input_testo")
     st.file_uploader("Carica Immagine", type=['png', 'jpg', 'jpeg'], key="input_foto")
     st.multiselect("Social Media:", canali_list, key="input_canali")
-    
     st.date_input("Data Inizio", datetime.now(), key="input_data_inizio", format="DD/MM/YYYY")
     st.date_input("Data Fine", datetime.now() + timedelta(days=14), key="input_data_fine", format="DD/MM/YYYY")
-    
     st.number_input("Frequenza (giorni)", min_value=1, value=1, key="input_frequenza")
     st.multiselect("Responsabili:", team_list, key="input_assegnati")
-    
-    if st.button("Genera e Salva nel DB", type="primary", use_container_width=True):
+    if st.button("Genera e Salva", type="primary", use_container_width=True):
         genera_piano()
         st.rerun()
 
@@ -120,22 +116,31 @@ with t1:
         df_vis = df_task.copy()
         df_vis['Data_Prevista'] = pd.to_datetime(df_vis['Data_Prevista']).dt.strftime('%d-%m-%Y')
         
-        st.write("### 📝 Task in programma")
+        # --- LOGICA THUMBNAIL ---
+        # Creiamo una colonna "Anteprima" che punta ai bytes della foto
+        # Streamlit ImageColumn può leggere direttamente i bytes
+        df_vis.insert(1, "Anteprima", df_vis["Foto_Bytes"])
         df_vis.insert(0, "Seleziona", False)
         
-        # AGGIORNATO: Aggiunta colonna Titolo nella visualizzazione
-        col_show = ["Seleziona", "ID", "Titolo", "Data_Prevista", "Stato", "Canali"]
+        st.write("### 📝 Task in programma")
+        
+        # Colonne da mostrare (Includiamo Anteprima)
+        col_show = ["Seleziona", "Anteprima", "ID", "Titolo", "Data_Prevista", "Stato"]
         
         edited = st.data_editor(
             df_vis[col_show],
             column_config={
                 "Seleziona": st.column_config.CheckboxColumn("Gestisci"),
+                "Anteprima": st.column_config.ImageColumn("Immagine", help="Anteprima della foto caricata"),
                 "Titolo": st.column_config.TextColumn("Titolo", width="medium"),
                 "Data_Prevista": "Scadenza",
                 "ID": st.column_config.NumberColumn("ID", format="%d")
             },
             disabled=[c for c in col_show if c != "Seleziona"],
-            hide_index=True, use_container_width=True, key="main_editor"
+            hide_index=True, 
+            use_container_width=True, 
+            key="main_editor",
+            row_height=60 # Altezza riga aumentata per vedere meglio la thumbnail
         )
         
         selected_ids = edited[edited["Seleziona"] == True]["ID"].tolist()
@@ -149,13 +154,11 @@ with t1:
                 with st.expander(f"📦 {task['Titolo']} (#{sel_id}) - {data_formattata}", expanded=True):
                     c1, c2 = st.columns([3, 2])
                     with c1:
-                        # Permettiamo di modificare il titolo
                         new_tit = st.text_input("Modifica Titolo:", task["Titolo"], key=f"edit_tit_{sel_id}")
                         if new_tit != task["Titolo"]:
                             run_query("UPDATE tasks SET Titolo = ? WHERE ID = ?", (new_tit, sel_id))
                         
                         st.info(f"**Social:** {task['Canali']} | **Chi:** {task['Assegnato_a']}")
-                        
                         new_txt = st.text_area("Copy del post:", task["Contenuto"], key=f"ed_txt_{sel_id}", height=120)
                         if new_txt != task["Contenuto"]:
                             run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_txt, sel_id))
@@ -164,10 +167,11 @@ with t1:
                         if task["Foto_Bytes"]:
                             st.image(task["Foto_Bytes"], use_container_width=True)
                             st.download_button("💾 Scarica", task["Foto_Bytes"], file_name=task["Foto_Nome"], key=f"dl_{sel_id}")
+                        else:
+                            st.write("Nessuna immagine")
                     
                     st.divider()
                     col_act1, col_act2, col_act3 = st.columns([2, 2, 1])
-                    
                     if task["Stato"] != "🟢 Completato":
                         chi = col_act1.selectbox("Eseguito da:", team_list, key=f"u_{sel_id}")
                         if col_act2.button("✅ Segna completato", key=f"b_{sel_id}", use_container_width=True):
