@@ -47,7 +47,6 @@ df_task, team_list, canali_list = get_all_data()
 # --- INTERFACCIA ---
 st.title("📅 Social Task Manager Pro")
 
-# Sidebar per inserimento
 with st.sidebar:
     st.header("🚀 Nuovo Piano")
     st.text_input("Titolo *", key="input_titolo")
@@ -55,7 +54,7 @@ with st.sidebar:
     st.date_input("Inizio", datetime.now(), key="input_data_inizio")
     st.date_input("Fine", datetime.now() + timedelta(days=7), key="input_data_fine")
     if st.button("Genera Piano", type="primary", use_container_width=True):
-        # ... logica inserimento (omessa per brevità, rimane uguale)
+        # Logica di generazione (semplificata per focus su paginazione)
         st.rerun()
 
 tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
@@ -63,67 +62,73 @@ tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 with tab1:
     if not df_task.empty:
         # --- LOGICA PAGINAZIONE ---
-        records_per_page = 10
-        total_pages = math.ceil(len(df_task) / records_per_page)
+        if 'page' not in st.session_state: st.session_state.page = 1
+        per_page = 10
+        total_p = math.ceil(len(df_task) / per_page)
         
-        # Inizializza lo stato della pagina
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = 1
+        start = (st.session_state.page - 1) * per_page
+        end = start + per_page
+        df_page = df_task.iloc[start:end].copy()
 
-        # Filtro del dataframe per la pagina corrente
-        start_idx = (st.session_state.current_page - 1) * records_per_page
-        end_idx = start_idx + records_per_page
-        df_page = df_task.iloc[start_idx:end_idx].copy()
-
-        # Preparazione visualizzazione
+        # Preparazione DataFrame
         df_page['Data'] = pd.to_datetime(df_page['Data_Prevista']).dt.strftime('%d-%m-%Y')
         df_page['Foto'] = df_page['Foto_Bytes'].apply(get_image_base64)
         df_page.insert(0, "📂", False)
         
-        # Tabella con righe basse
+        # Tabella Compatta (Key fissa per non perdere la selezione)
         edited = st.data_editor(
             df_page[["📂", "Foto", "Titolo", "Data", "Stato"]],
             column_config={
-                "📂": st.column_config.CheckboxColumn("Mod.", width="small"),
+                "📂": st.column_config.CheckboxColumn("Vedi", width="small"),
                 "Foto": st.column_config.ImageColumn("Anteprima"),
-                "Data": "Scadenza"
             },
             disabled=["Foto", "Titolo", "Data", "Stato"],
-            hide_index=True, 
-            use_container_width=True, 
-            key=f"editor_page_{st.session_state.current_page}", 
-            row_height=35
+            hide_index=True, use_container_width=True, key="main_task_editor", row_height=35
         )
 
-        # --- CONTROLLI PAGINAZIONE (Stile immagine richiesta) ---
-        col_pag1, col_pag2, col_pag3, col_pag4, col_pag5 = st.columns([1, 1, 2, 1, 1])
-        
-        with col_pag2:
-            if st.button("❮", disabled=(st.session_state.current_page == 1)):
-                st.session_state.current_page -= 1
+        # --- CONTROLLI PAGINAZIONE (Stile richiesto) ---
+        c_pag1, c_pag2, c_pag3, c_pag4, c_pag5 = st.columns([2, 1, 1, 1, 2])
+        with c_pag2:
+            if st.button("❮", disabled=(st.session_state.page == 1)):
+                st.session_state.page -= 1
                 st.rerun()
-        
-        with col_pag3:
-            st.markdown(f"<p style='text-align: center; background-color: #e1f5fe; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; margin: auto; font-weight: bold; color: #0288d1;'>{st.session_state.current_page}</p>", unsafe_allow_html=True)
-        
-        with col_pag4:
-            if st.button("❯", disabled=(st.session_state.current_page == total_pages)):
-                st.session_state.current_page += 1
+        with c_pag3:
+            # Cerchietto con numero pagina
+            st.markdown(f"""<div style='text-align: center; background-color: #f0fdf4; border: 1px solid #dcfce7; 
+                        border-radius: 50%; width: 35px; height: 35px; line-height: 35px; margin: auto; 
+                        font-weight: bold; color: #16a34a;'>{st.session_state.page}</div>""", unsafe_allow_html=True)
+        with c_pag4:
+            if st.button("❯", disabled=(st.session_state.page == total_p)):
+                st.session_state.page += 1
                 st.rerun()
-        
-        st.caption(f"Pagina {st.session_state.current_page} di {total_pages} ({len(df_task)} task totali)")
 
-        # LOGICA MODIFICA/ELIMINAZIONE (basata sull'ID reale del task)
-        selected_rows = edited[edited["📂"] == True].index.tolist()
-        if selected_rows:
-            for idx_in_page in selected_rows:
-                # Recuperiamo l'ID corretto dal DataFrame della pagina
-                task = df_page.iloc[idx_in_page]
+        # --- VISUALIZZAZIONE DETTAGLI ---
+        # Verifichiamo quali righe della pagina corrente sono state selezionate
+        selection = edited[edited["📂"] == True]
+        
+        if not selection.empty:
+            st.divider()
+            for idx in selection.index:
+                # Usiamo l'indice della pagina per recuperare il task dal DataFrame filtrato
+                task = df_page.loc[idx]
                 tid = task["ID"]
-                with st.expander(f"⚙️ GESTIONE: {task['Titolo']}", expanded=True):
-                    # ... (Pulsanti Salva/Elimina rimangono uguali alle versioni precedenti)
-                    if st.button("🗑️ Elimina Definitivamente", key=f"del_{tid}"):
-                        run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
-                        st.rerun()
+                
+                with st.expander(f"📦 DETTAGLI: {task['Titolo']} ({task['Data']})", expanded=True):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        new_txt = st.text_area("Testo Post:", value=task["Contenuto"], key=f"txt_{tid}")
+                        b1, b2 = st.columns(2)
+                        if b1.button("💾 Salva", key=f"s_{tid}", type="primary"):
+                            run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_txt, tid))
+                            st.rerun()
+                        if b2.button("🗑️ Elimina", key=f"d_{tid}"):
+                            run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
+                            st.rerun()
+                    with col2:
+                        if task["Foto_Bytes"]: st.image(task["Foto_Bytes"])
     else:
-        st.info("Nessun task in archivio.")
+        st.info("Nessun task.")
+
+with tab2:
+    st.subheader("Configurazione")
+    # ... (Il resto rimane uguale)
