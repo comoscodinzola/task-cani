@@ -32,7 +32,11 @@ def init_db():
 
 def load_data(table):
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+    # MODIFICA: Aggiunto ORDER BY per garantire l'ordine cronologico crescente
+    if table == "tasks":
+        df = pd.read_sql_query(f"SELECT * FROM {table} ORDER BY Data_Prevista ASC, ID ASC", conn)
+    else:
+        df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
     conn.close()
     return df
 
@@ -70,7 +74,6 @@ def genera_piano():
     conn = sqlite3.connect(DB_NAME)
     temp_date = inizio
     while temp_date <= fine:
-        # Salviamo in formato ISO (YYYY-MM-DD) per l'ordinamento SQL, ma lo visualizzeremo GG-MM-YYYY
         conn.execute('''INSERT INTO tasks 
             (Data_Prevista, Canali, Contenuto, Foto_Nome, Foto_Bytes, Assegnato_a, Stato, Completato_da, Data_Fine) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -90,7 +93,6 @@ with st.sidebar:
     st.file_uploader("Carica Immagine", type=['png', 'jpg', 'jpeg'], key="input_foto")
     st.multiselect("Social Media:", canali_list, key="input_canali")
     
-    # Input date con formato europeo visualizzato
     st.date_input("Data Inizio", datetime.now(), key="input_data_inizio", format="DD/MM/YYYY")
     st.date_input("Data Fine", datetime.now() + timedelta(days=14), key="input_data_fine", format="DD/MM/YYYY")
     
@@ -106,15 +108,13 @@ t1, t2 = st.tabs(["📋 Elenco Attività", "⚙️ Configurazione"])
 
 with t1:
     if not df_task.empty:
-        # --- TRASFORMAZIONE DATE PER VISUALIZZAZIONE ---
         df_vis = df_task.copy()
-        # Convertiamo la colonna data in formato GG-MM-AAAA
+        # Visualizzazione data nel formato GG-MM-AAAA
         df_vis['Data_Prevista'] = pd.to_datetime(df_vis['Data_Prevista']).dt.strftime('%d-%m-%Y')
         
-        st.write("### 📝 Task in programma")
+        st.write("### 📝 Task in programma (Ordine Cronologico)")
         df_vis.insert(0, "Seleziona", False)
         
-        # Selezione colonne utili
         col_show = ["Seleziona", "ID", "Data_Prevista", "Stato", "Canali", "Assegnato_a"]
         
         edited = st.data_editor(
@@ -133,9 +133,7 @@ with t1:
         if selected_ids:
             st.divider()
             for sel_id in selected_ids:
-                # Recuperiamo i dati originali del task
                 task = df_task[df_task["ID"] == sel_id].iloc[0]
-                # Formattiamo la data per il titolo dell'expander
                 data_formattata = datetime.strptime(task['Data_Prevista'], "%Y-%m-%d").strftime("%d-%m-%Y")
                 
                 with st.expander(f"📦 Task #{sel_id} del {data_formattata}", expanded=True):
@@ -157,7 +155,6 @@ with t1:
                     if task["Stato"] != "🟢 Completato":
                         chi = col_act1.selectbox("Eseguito da:", team_list, key=f"u_{sel_id}")
                         if col_act2.button("✅ Segna come completato", key=f"b_{sel_id}", use_container_width=True):
-                            # Data fine con ora e data italiana
                             now_str = datetime.now().strftime("%d-%m-%Y %H:%M")
                             run_query("UPDATE tasks SET Stato='🟢 Completato', Completato_da=?, Data_Fine=? WHERE ID=?", (chi, now_str, sel_id))
                             st.rerun()
@@ -172,6 +169,7 @@ with t1:
 
 with t2:
     col_a, col_b = st.columns(2)
+    # (Codice gestione team e canali identico al precedente...)
     with col_a:
         st.subheader("👥 Team")
         with st.container(border=True):
@@ -180,7 +178,6 @@ with t2:
                 if new_m:
                     run_query("INSERT OR IGNORE INTO team VALUES (?)", (new_m,))
                     st.rerun()
-            
             st.write("---")
             for t in team_list:
                 ca, cb = st.columns([4, 1])
@@ -188,7 +185,6 @@ with t2:
                 if cb.button("X", key=f"rm_t_{t}"):
                     run_query("DELETE FROM team WHERE nome = ?", (t,))
                     st.rerun()
-                
     with col_b:
         st.subheader("📢 Canali")
         with st.container(border=True):
@@ -197,7 +193,6 @@ with t2:
                 if new_c:
                     run_query("INSERT OR IGNORE INTO canali VALUES (?)", (new_c,))
                     st.rerun()
-            
             st.write("---")
             for c in canali_list:
                 ca, cb = st.columns([4, 1])
