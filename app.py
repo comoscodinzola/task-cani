@@ -2,41 +2,48 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Gestore Task Social", layout="wide")
+st.set_page_config(page_title="Social Task Manager", layout="wide")
+
+# --- DATABASE IN MEMORIA ---
+if 'db_task' not in st.session_state:
+    st.session_state.db_task = pd.DataFrame(columns=[
+        "ID", "Data Prevista", "Canali", "Contenuto", "Foto_Nome", "Foto_Bytes", "Assegnato a", "Stato", "Completato da", "Data Fine"
+    ])
 
 st.title("📅 Programmatore Task & Post")
 
-# Inizializziamo il database in memoria se non esiste ancora
-if 'db_task' not in st.session_state:
-    st.session_state.db_task = pd.DataFrame(columns=[
-        "Data Prevista", "Contenuto", "Foto", "Assegnato a", "Stato", "Completato da", "Data Fine"
-    ])
-
-# --- SIDEBAR PER NUOVO TASK ---
-st.sidebar.header("Crea Nuovo Task")
+# --- SIDEBAR: CREAZIONE ---
+st.sidebar.header("🚀 Crea Nuovo Piano")
 testo_post = st.sidebar.text_area("Testo del Post")
 foto = st.sidebar.file_uploader("Carica Foto", type=['png', 'jpg', 'jpeg'])
-data_inizio = st.sidebar.date_input("Data inizio pubblicazione", datetime.now())
-data_fine = st.sidebar.date_input("Data fine pubblicazione", datetime.now() + timedelta(days=60))
-frequenza = st.sidebar.number_input("Intervallo (giorni)", min_value=1, value=7)
 
-# MODIFICA: Ora puoi scegliere più persone
+canali_opzioni = ["Facebook", "Instagram", "Stato WhatsApp", "Gruppi WhatsApp", "Community WhatsApp"]
+canali_scelti = st.sidebar.multiselect("Canali di pubblicazione:", canali_opzioni)
+
+data_inizio = st.sidebar.date_input("Inizio", datetime.now())
+data_fine = st.sidebar.date_input("Fine", datetime.now() + timedelta(days=30))
+frequenza = st.sidebar.number_input("Ogni quanti giorni?", min_value=1, value=7)
+
 nomi_team = ["Persona A", "Persona B", "Persona C", "Marco", "Giulia"]
 assegnati = st.sidebar.multiselect("Assegna a:", nomi_team)
 
 if st.sidebar.button("Genera Piano Editoriale"):
     nuovi_task = []
     current_date = data_inizio
-    nome_foto = foto.name if foto else "Nessuna foto"
+    foto_bytes = foto.getvalue() if foto else None
+    foto_nome = foto.name if foto else "Nessuna foto"
+    canali_str = ", ".join(canali_scelti)
+    persone_str = ", ".join(assegnati)
     
-    # Trasformiamo la lista di persone in una stringa leggibile
-    persone_str = ", ".join(assegnati) if assegnati else "Non assegnato"
-
     while current_date <= data_fine:
+        task_id = len(st.session_state.db_task) + len(nuovi_task) + 1
         nuovi_task.append({
+            "ID": task_id,
             "Data Prevista": current_date,
+            "Canali": canali_str,
             "Contenuto": testo_post,
-            "Foto": nome_foto,
+            "Foto_Nome": foto_nome,
+            "Foto_Bytes": foto_bytes,
             "Assegnato a": persone_str,
             "Stato": "🔴 Da fare",
             "Completato da": "-",
@@ -44,30 +51,57 @@ if st.sidebar.button("Genera Piano Editoriale"):
         })
         current_date += timedelta(days=frequenza)
     
-    # Aggiungiamo i nuovi task a quelli esistenti
-    df_nuovi = pd.DataFrame(nuovi_task)
-    st.session_state.db_task = pd.concat([st.session_state.db_task, df_nuovi], ignore_index=True)
-    st.success(f"Generati {len(nuovi_task)} task con successo!")
+    st.session_state.db_task = pd.concat([st.session_state.db_task, pd.DataFrame(nuovi_task)], ignore_index=True)
+    st.success("Piano generato!")
 
-# --- AREA PRINCIPALE: VISUALIZZAZIONE ---
-st.header("📋 Task Programmati")
-
+# --- AREA PRINCIPALE: TABELLA ---
+st.header("📋 Elenco Task")
 if not st.session_state.db_task.empty:
-    # Rendiamo la tabella modificabile
-    # Puoi cambiare lo Stato o scrivere chi lo ha fatto direttamente nella tabella
-    st.session_state.db_task = st.data_editor(
-        st.session_state.db_task, 
-        num_rows="dynamic", 
-        use_container_width=True,
-        column_config={
-            "Stato": st.column_config.SelectboxColumn(
-                options=["🔴 Da fare", "🟡 In corso", "🟢 Completato"]
-            )
-        }
-    )
-else:
-    st.info("Nessun task generato. Usa il menu a sinistra per iniziare.")
+    # Selezione del task da gestire
+    selected_indices = st.multiselect("Seleziona i task da visualizzare o gestire (ID):", st.session_state.db_task["ID"].tolist())
+    
+    # Mostriamo la tabella completa (sola lettura per ordine)
+    st.dataframe(st.session_state.db_task.drop(columns=["Foto_Bytes"]), use_container_width=True)
 
-if st.button("Pulisci tutto"):
-    st.session_state.db_task = pd.DataFrame(columns=["Data Prevista", "Contenuto", "Foto", "Assegnato a", "Stato", "Completato da", "Data Fine"])
+    # --- DETTAGLIO TASK SELEZIONATO ---
+    if selected_indices:
+        st.divider()
+        st.header("🔍 Gestione Task Selezionato")
+        
+        for sel_id in selected_indices:
+            idx = st.session_state.db_task[st.session_state.db_task["ID"] == sel_id].index[0]
+            task = st.session_state.db_task.iloc[idx]
+            
+            with st.expander(label=f"TASK #{sel_id} - Scadenza: {task['Data Prevista']}", expanded=True):
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.write(f"**📢 Canali:** {task['Canali']}")
+                    st.write(f"**👥 Assegnati:** {task['Assegnato a']}")
+                    st.text_area("Testo da copiare:", task["Contenuto"], height=100, key=f"txt_{sel_id}")
+                
+                with col2:
+                    if task["Foto_Bytes"]:
+                        st.image(task["Foto_Bytes"], width=150)
+                        st.download_button(label="⬇️ Scarica Foto", data=task["Foto_Bytes"], file_name=task["Foto_Nome"], key=f"dl_{sel_id}")
+                    else:
+                        st.warning("Nessuna foto")
+
+                # Azione di completamento
+                if task["Stato"] != "🟢 Completato":
+                    st.subheader("✅ Segna come completato")
+                    chi = st.selectbox("Chi sta completando il task?", task["Assegnato a"].split(", "), key=f"chi_{sel_id}")
+                    if st.button(f"Conferma Task #{sel_id}", key=f"btn_{sel_id}"):
+                        st.session_state.db_task.at[idx, "Stato"] = "🟢 Completato"
+                        st.session_state.db_task.at[idx, "Completato da"] = chi
+                        st.session_state.db_task.at[idx, "Data Fine"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        st.rerun()
+                else:
+                    st.success(f"Completato da {task['Completato da']} il {task['Data Fine']}")
+
+else:
+    st.info("Crea un piano dalla sidebar per vedere i task.")
+
+if st.button("Svuota tutto"):
+    st.session_state.db_task = pd.DataFrame(columns=["ID", "Data Prevista", "Canali", "Contenuto", "Foto_Nome", "Foto_Bytes", "Assegnato a", "Stato", "Completato da", "Data Fine"])
     st.rerun()
