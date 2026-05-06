@@ -27,51 +27,68 @@ def get_all_data():
 
 def get_image_base64(image_bytes):
     if not image_bytes: return None
-    try: return f"data:image/png;base64,{base64.encodebytes(image_bytes).decode()}"
+    try: return f"data:image/png;base64,{base64.b64encode(image_bytes).decode()}"
     except: return None
 
-# --- CALLBACKS (LA SOLUZIONE) ---
+# --- CALLBACKS MIGLIORATI ---
 def save_changes(tid):
-    # Recuperiamo i valori direttamente dallo stato dei widget
+    # Leggiamo i valori dai widget usando le chiavi univoche
     new_tit = st.session_state[f"etit_{tid}"]
     new_lnk = st.session_state[f"elnk_{tid}"]
     new_cnt = st.session_state[f"ecnt_{tid}"]
+    
+    # Eseguiamo l'aggiornamento nel database
     run_query("UPDATE tasks SET Titolo=?, Link=?, Contenuto=? WHERE ID=?", 
               (new_tit, new_lnk, new_cnt, tid))
-    st.toast("✅ Modifiche salvate con successo!")
+    
+    # FORZIAMO il ricaricamento dei dati globali prima del prossimo ciclo
+    st.session_state["force_reload"] = True
+    st.toast(f"✅ Record {tid} salvato correttamente nel DB!")
 
 def delete_task(tid):
     run_query("DELETE FROM tasks WHERE ID=?", (tid,))
     if "selected_tid" in st.session_state:
         del st.session_state.selected_tid
-    st.toast("🗑️ Task eliminato")
+    st.session_state["force_reload"] = True
+    st.toast("🗑️ Task rimosso.")
 
-# --- CARICAMENTO DATI ---
-df_task, team_list, canali_list = get_all_data()
+# --- GESTIONE DATI (RELOAD-AWARE) ---
+if "force_reload" in st.session_state or "df_task" not in st.session_state:
+    df_task, team_list, canali_list = get_all_data()
+    st.session_state.df_task = df_task
+    st.session_state.team_list = team_list
+    st.session_state.canali_list = canali_list
+    if "force_reload" in st.session_state:
+        del st.session_state["force_reload"]
+else:
+    df_task = st.session_state.df_task
+    team_list = st.session_state.team_list
+    canali_list = st.session_state.canali_list
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🚀 Nuovo Piano")
     titolo_in = st.text_input("Titolo *")
     testo_in = st.text_area("Testo Post *")
-    link_in = st.text_input("Link")
+    link_in = st.text_input("Link (https://...)")
     foto_in = st.file_uploader("Immagine", type=['png', 'jpg', 'jpeg'])
     canali_sel = st.multiselect("Canali:", canali_list)
-    data_inizio = st.date_input("Inizio", datetime.now())
-    data_fine = st.date_input("Fine", datetime.now() + timedelta(days=7))
-    frequenza = st.number_input("Ogni quanti giorni?", min_value=1, value=1)
-    assegnati_a = st.multiselect("Assegna a:", team_list)
+    d_ini = st.date_input("Inizio", datetime.now())
+    d_fin = st.date_input("Fine", datetime.now() + timedelta(days=7))
+    freq = st.number_input("Ogni quanti giorni?", min_value=1, value=1)
+    ass_a = st.multiselect("Assegna a:", team_list)
     
     if st.button("Genera Piano", type="primary", use_container_width=True):
         if titolo_in and testo_in:
-            curr = data_inizio
-            while curr <= data_fine:
+            curr = d_ini
+            while curr <= d_fin:
                 run_query('''INSERT INTO tasks (Titolo, Data_Prevista, Canali, Contenuto, Link, Foto_Nome, Foto_Bytes, Assegnato_a, Stato, Completato_da, Data_Fine) 
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                           (titolo_in, curr.strftime("%Y-%m-%d"), ", ".join(canali_sel), testo_in, link_in, 
                            foto_in.name if foto_in else "", foto_in.getvalue() if foto_in else None,
-                           ", ".join(assegnati_a), "🔴 Da fare", "-", "-"))
-                curr += timedelta(days=frequenza)
+                           ", ".join(ass_a), "🔴 Da fare", "-", "-"))
+                curr += timedelta(days=freq)
+            st.session_state["force_reload"] = True
             st.rerun()
 
 # --- MAIN ---
@@ -80,6 +97,7 @@ tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 
 with tab1:
     if not df_task.empty:
+        # Paginazione
         if 'page' not in st.session_state: st.session_state.page = 1
         per_page = 10
         total_p = math.ceil(len(df_task) / per_page)
@@ -90,6 +108,7 @@ with tab1:
         df_page['Foto'] = df_page['Foto_Bytes'].apply(get_image_base64)
         df_page.insert(0, "📂", False)
         
+        # Tabella editor
         edited = st.data_editor(
             df_page[["📂", "Foto", "Titolo", "Data", "Stato"]],
             column_config={
@@ -100,39 +119,45 @@ with tab1:
             hide_index=True, use_container_width=True, key="main_task_editor", row_height=35
         )
 
-        # Selezione ID
+        # Selezione persistente
         selection = edited[edited["📂"] == True]
         if not selection.empty:
             st.session_state.selected_tid = df_page.loc[selection.index[0], "ID"]
 
-        # Form di Modifica
         if "selected_tid" in st.session_state:
-            current_task = df_task[df_task["ID"] == st.session_state.selected_tid].iloc[0]
-            tid = current_task["ID"]
-            
-            with st.expander(f"⚙️ MODIFICA: {current_task['Titolo']}", expanded=True):
-                col_l, col_r = st.columns([3, 1.5])
-                with col_l:
-                    # Usiamo i Key per i widget
-                    st.text_input("Titolo:", value=current_task["Titolo"], key=f"etit_{tid}")
-                    st.text_input("Link:", value=str(current_task["Link"]) if current_task["Link"] else "", key=f"elnk_{tid}")
-                    st.text_area("Contenuto:", value=current_task["Contenuto"], key=f"ecnt_{tid}", height=150)
-                    
-                    c1, c2, c3 = st.columns(3)
-                    # Il segreto è 'on_click'
-                    c1.button("💾 SALVA", type="primary", on_click=save_changes, args=(tid,), use_container_width=True)
-                    c2.button("🗑️ ELIMINA", on_click=delete_task, args=(tid,), use_container_width=True)
-                    if c3.button("✖️ CHIUDI", use_container_width=True):
-                        del st.session_state.selected_tid
-                        st.rerun()
-
-                with col_r:
-                    if current_task["Foto_Bytes"]:
-                        st.image(current_task["Foto_Bytes"])
+            # Recuperiamo i dati freschi dal DataFrame ricaricato
+            task_res = df_task[df_task["ID"] == st.session_state.selected_tid]
+            if not task_res.empty:
+                current_task = task_res.iloc[0]
+                tid = current_task["ID"]
+                
+                with st.expander(f"⚙️ MODIFICA: {current_task['Titolo']}", expanded=True):
+                    cl, cr = st.columns([3, 1.5])
+                    with cl:
+                        # Widget con chiavi univoche
+                        st.text_input("Titolo:", value=current_task["Titolo"], key=f"etit_{tid}")
+                        st.text_input("Link:", value=str(current_task["Link"]) if current_task["Link"] else "", key=f"elnk_{tid}")
+                        st.text_area("Contenuto:", value=current_task["Contenuto"], key=f"ecnt_{tid}", height=150)
+                        
+                        c1, c2, c3 = st.columns(3)
+                        # Il salvataggio chiama il callback che aggiorna il DB e forza il reload
+                        c1.button("💾 SALVA", type="primary", on_click=save_changes, args=(tid,), use_container_width=True)
+                        c2.button("🗑️ ELIMINA", on_click=delete_task, args=(tid,), use_container_width=True)
+                        if c3.button("✖️ CHIUDI", use_container_width=True):
+                            del st.session_state.selected_tid
+                            st.rerun()
+                    with cr:
+                        if current_task["Foto_Bytes"]:
+                            st.image(current_task["Foto_Bytes"])
     else:
-        st.info("Archivio vuoto.")
+        st.info("Nessun task.")
 
 with tab2:
     st.subheader("Configurazione")
-    # ... (il resto del codice della Tab 2 rimane invariato)
-    st.write("Usa la sidebar per aggiungere o la Tab 1 per gestire.")
+    # Tasto pulizia massiva aggiornato per forzare il ricaricamento
+    tit_del = st.text_input("Titolo da rimuovere massivamente:")
+    if st.button("Togli dal DB record con questo Titolo", type="secondary"):
+        if tit_del:
+            run_query("DELETE FROM tasks WHERE Titolo = ?", (tit_del,))
+            st.session_state["force_reload"] = True
+            st.rerun()
