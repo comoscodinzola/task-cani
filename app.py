@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd
 import sqlite3
 from datetime import datetime, timedelta
 import base64
@@ -47,6 +47,7 @@ def run_query(query, params=()):
         c.execute(query, params)
         conn.commit()
 
+# Pulizia task scaduti da più di 3 giorni
 def pulisci_scaduti_vecchi():
     limite_cancellazione = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
     run_query("DELETE FROM tasks WHERE Stato = '🔴 Da fare' AND Data_Prevista < ?", (limite_cancellazione,))
@@ -133,13 +134,12 @@ with tab1:
                 with st.expander(f"📦 MODIFICA TASK: {task['Titolo']} ({task['Data_Prevista']})", expanded=True):
                     c1, c2 = st.columns([3, 1.5])
                     with c1:
-                        # Gestione sicura del link per evitare il TypeError
-                        current_link = task["Link"] if task["Link"] and str(task["Link"]).strip() != "" else ""
+                        # Gestione sicura del link
+                        current_link = str(task["Link"]).strip() if task["Link"] else ""
                         
                         st.text_input("🔗 Link (URL):", value=current_link, key=f"exp_link_{tid}")
                         
-                        # Mostra il pulsante solo se il link esiste ed è valido
-                        if current_link:
+                        if current_link and current_link != "None":
                             st.link_button("🚀 Vai al Link", current_link, use_container_width=False)
                         
                         st.text_area("📝 Testo:", value=task["Contenuto"], key=f"exp_txt_{tid}", height=150)
@@ -154,9 +154,9 @@ with tab1:
                         if task["Foto_Bytes"]:
                             st.image(task["Foto_Bytes"])
                             st.download_button(
-                                label="📥 Scarica Immagine",
+                                label="📥 Scarica Foto",
                                 data=task["Foto_Bytes"],
-                                file_name=f"social_task_{tid}.png",
+                                file_name=f"task_{tid}.png",
                                 mime="image/png",
                                 key=f"dl_{tid}",
                                 use_container_width=True
