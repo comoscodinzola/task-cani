@@ -9,6 +9,7 @@ import math
 st.set_page_config(page_title="Social Task Manager Pro", layout="wide", page_icon="📅")
 DB_NAME = "social_tasks.db"
 
+# --- FUNZIONI DATABASE ---
 def run_query(query, params=()):
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
@@ -20,7 +21,10 @@ def get_all_data():
         df_t = pd.read_sql_query("SELECT * FROM tasks ORDER BY Data_Prevista ASC", conn)
         df_team = pd.read_sql_query("SELECT nome FROM team", conn)
         df_canali = pd.read_sql_query("SELECT nome FROM canali", conn)
-    return df_t, df_team["nome"].tolist(), df_canali["nome"].tolist()
+    # Default se vuoti
+    t_list = df_team["nome"].tolist() if not df_team.empty else ["Membro 1"]
+    c_list = df_canali["nome"].tolist() if not df_canali.empty else ["Instagram"]
+    return df_t, t_list, c_list
 
 def get_image_base64(image_bytes):
     if not image_bytes: return None
@@ -29,12 +33,38 @@ def get_image_base64(image_bytes):
 
 df_task, team_list, canali_list = get_all_data()
 
-st.title("📅 Social Task Manager Pro")
+# --- SIDEBAR (RIPRISTINATA) ---
+with st.sidebar:
+    st.header("🚀 Nuovo Piano")
+    titolo = st.text_input("Titolo *")
+    testo = st.text_area("Testo Post *")
+    link_input = st.text_input("Link (inizia con http://)")
+    foto = st.file_uploader("Immagine", type=['png', 'jpg', 'jpeg'])
+    canali_sel = st.multiselect("Canali:", canali_list)
+    data_in = st.date_input("Inizio", datetime.now())
+    data_fi = st.date_input("Fine", datetime.now() + timedelta(days=7))
+    freq = st.number_input("Ogni quanti giorni?", min_value=1, value=1)
+    assegnati = st.multiselect("Assegna a:", team_list)
+    
+    if st.button("Genera Piano", type="primary", use_container_width=True):
+        if titolo and testo:
+            curr = data_in
+            while curr <= data_fi:
+                run_query('''INSERT INTO tasks (Titolo, Data_Prevista, Canali, Contenuto, Link, Foto_Nome, Foto_Bytes, Assegnato_a, Stato, Completato_da, Data_Fine) 
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                          (titolo, curr.strftime("%Y-%m-%d"), ", ".join(canali_sel), testo, link_input, 
+                           foto.name if foto else "", foto.getvalue() if foto else None,
+                           ", ".join(assegnati), "🔴 Da fare", "-", "-"))
+                curr += timedelta(days=freq)
+            st.rerun()
 
+# --- TABELLA PRINCIPALE ---
+st.title("📅 Social Task Manager Pro")
 tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 
 with tab1:
     if not df_task.empty:
+        # Paginazione
         if 'page' not in st.session_state: st.session_state.page = 1
         per_page = 10
         total_p = math.ceil(len(df_task) / per_page)
@@ -55,7 +85,7 @@ with tab1:
             hide_index=True, use_container_width=True, key="main_task_editor", row_height=35
         )
 
-        # Controlli paginazione
+        # Navigazione (Stile immagine)
         cp1, cp2, cp3, cp4, cp5 = st.columns([2, 1, 1, 1, 2])
         with cp2:
             if st.button("❮", disabled=(st.session_state.page == 1)):
@@ -77,35 +107,43 @@ with tab1:
                 with st.expander(f"⚙️ GESTIONE: {task['Titolo']}", expanded=True):
                     col_l, col_r = st.columns([3, 1.5])
                     with col_l:
-                        # FIX LINK: Verifichiamo che sia una stringa valida prima di creare il bottone
+                        # Gestione Link sicura
                         raw_link = str(task["Link"]) if task["Link"] else ""
-                        valid_link = raw_link if raw_link.startswith(("http://", "https://")) else ""
+                        if raw_link.startswith("http"):
+                            st.link_button("🚀 Vai al Link", raw_link, use_container_width=True)
                         
-                        if valid_link:
-                            st.link_button("🚀 Vai al Link", valid_link, use_container_width=True)
-                        else:
-                            st.warning("Link non disponibile o non valido (deve iniziare con http)")
-
-                        new_t = st.text_area("Contenuto:", value=task["Contenuto"], key=f"t_{tid}", height=100)
+                        new_t = st.text_area("Contenuto:", value=task["Contenuto"], key=f"t_{tid}")
                         
-                        b_col1, b_col2 = st.columns(2)
-                        if b_col1.button("💾 Salva", key=f"s_{tid}", type="primary", use_container_width=True):
+                        b1, b2 = st.columns(2)
+                        if b1.button("💾 Salva", key=f"s_{tid}", type="primary", use_container_width=True):
                             run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_t, tid))
                             st.rerun()
                         
-                        # ELIMINAZIONE DIRETTA (Testata)
-                        if b_col2.button("🗑️ ELIMINA", key=f"del_{tid}", use_container_width=True):
+                        # ELIMINAZIONE
+                        if b2.button("🗑️ ELIMINA", key=f"del_{tid}", use_container_width=True):
                             run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
+                            st.session_state.main_task_editor = None # Reset editor per forzare pulizia
                             st.rerun()
 
                     with col_r:
                         if task["Foto_Bytes"]:
                             st.image(task["Foto_Bytes"])
                             st.download_button("📥 Scarica", task["Foto_Bytes"], f"f_{tid}.png", key=f"dl_{tid}")
+    else:
+        st.info("Nessun task.")
 
 with tab2:
     st.subheader("Configurazione")
-    st.write("**Team attuale:**")
-    for m in team_list: st.text(f"• {m}")
-    st.write("**Canali attuali:**")
-    for c in canali_list: st.text(f"• {c}")
+    c1, c2 = st.columns(2)
+    with c1:
+        m_in = st.text_input("Nuovo Membro:")
+        if st.button("Aggiungi Membro"):
+            if m_in: run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (m_in,))
+            st.rerun()
+        for m in team_list: st.text(f"• {m}")
+    with c2:
+        c_in = st.text_input("Nuovo Canale:")
+        if st.button("Aggiungi Canale"):
+            if c_in: run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (c_in,))
+            st.rerun()
+        for c in canali_list: st.text(f"• {c}")
