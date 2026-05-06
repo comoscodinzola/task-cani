@@ -47,6 +47,7 @@ def run_query(query, params=()):
         c.execute(query, params)
         conn.commit()
 
+# Pulizia automatica task Da fare più vecchi di 3 giorni
 def pulisci_scaduti_vecchi():
     limite_cancellazione = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
     run_query("DELETE FROM tasks WHERE Stato = '🔴 Da fare' AND Data_Prevista < ?", (limite_cancellazione,))
@@ -108,40 +109,39 @@ tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 with tab1:
     if not df_task.empty:
         df_vis = df_task.copy()
-        df_vis['Data_Prevista'] = pd.to_datetime(df_vis['Data_Prevista']).dt.strftime('%d-%m-%Y')
+        df_vis['Data_Prevista_Str'] = pd.to_datetime(df_vis['Data_Prevista']).dt.strftime('%d-%m-%Y')
         df_vis['Anteprima'] = df_vis['Foto_Bytes'].apply(get_image_base64)
-        df_vis.insert(0, "Edit", False) # Colonna per aprire i dettagli
-        df_vis["🗑️"] = False # Nuova colonna per eliminazione rapida
+        df_vis.insert(0, "Dettagli", False)
+        df_vis["Elimina"] = False
         
-        # Colonne da visualizzare nella tabella
-        cols_to_show = ["Edit", "Anteprima", "Titolo", "Link", "Data_Prevista", "Stato", "🗑️"]
-        
+        # Visualizzazione tabella
         edited = st.data_editor(
-            df_vis[cols_to_show],
+            df_vis[["Dettagli", "Anteprima", "Titolo", "Link", "Data_Prevista_Str", "Stato", "Elimina"]],
             column_config={
-                "Edit": st.column_config.CheckboxColumn("Dettagli", width="small"),
+                "Dettagli": st.column_config.CheckboxColumn("📂", width="small"),
                 "Anteprima": st.column_config.ImageColumn("Foto"),
                 "Link": st.column_config.LinkColumn("Link", display_text="Apri"),
-                "🗑️": st.column_config.CheckboxColumn("Elimina", width="small"),
+                "Data_Prevista_Str": "Data Prevista",
+                "Elimina": st.column_config.CheckboxColumn("🗑️", width="small"),
             },
-            disabled=["Anteprima", "Titolo", "Link", "Data_Prevista", "Stato"],
+            disabled=["Anteprima", "Titolo", "Link", "Data_Prevista_Str", "Stato"],
             hide_index=True, use_container_width=True, key="main_editor", row_height=75
         )
         
-        # LOGICA ELIMINAZIONE RAPIDA (CESTINO)
-        deleted_indices = edited[edited["🗑️"] == True].index.tolist()
-        if deleted_indices:
-            for idx in deleted_indices:
-                tid = df_task.iloc[idx]["ID"]
-                run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
-            st.rerun()
+        # LOGICA ELIMINAZIONE MANUALE
+        to_delete = edited[edited["Elimina"] == True].index.tolist()
+        if to_delete:
+            if st.button(f"🗑️ Elimina {len(to_delete)} task selezionati", type="primary"):
+                for idx in to_delete:
+                    tid = df_task.iloc[idx]["ID"]
+                    run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
+                st.rerun()
 
-        # LOGICA APERTURA DETTAGLI (EDIT)
-        selected_indices = edited[edited["Edit"] == True].index.tolist()
-        
-        if selected_indices:
+        # LOGICA DETTAGLI/MODIFICA
+        to_edit = edited[edited["Dettagli"] == True].index.tolist()
+        if to_edit:
             st.divider()
-            for idx in selected_indices:
+            for idx in to_edit:
                 task = df_task.iloc[idx]
                 tid = task["ID"]
                 with st.expander(f"📦 MODIFICA: {task['Titolo']} ({task['Data_Prevista']})", expanded=True):
@@ -149,59 +149,49 @@ with tab1:
                     with c1:
                         current_link = str(task["Link"]).strip() if task["Link"] else ""
                         st.text_input("🔗 Link (URL):", value=current_link, key=f"exp_link_{tid}")
-                        
                         if current_link and current_link != "None" and current_link != "":
                             st.link_button("🚀 Vai al Link", current_link)
                         
-                        st.text_area("📝 Testo:", value=task["Contenuto"], key=f"exp_txt_{tid}", height=150)
+                        st.text_area("📝 Testo:", value=task["Contenuto"], key=f_txt_{tid} := f"exp_txt_{tid}", height=150)
                         
                         if st.button("💾 Salva Modifiche", key=f"save_btn_{tid}", type="primary"):
                             nuovo_link = st.session_state[f"exp_link_{tid}"]
-                            nuovo_testo = st.session_state[f"exp_txt_{tid}"]
+                            nuovo_testo = st.session_state[f_txt_{tid}]
                             run_query("UPDATE tasks SET Contenuto = ?, Link = ? WHERE ID = ?", (nuovo_testo, nuovo_link, tid))
                             st.rerun()
                             
                     with c2:
                         if task["Foto_Bytes"]:
                             st.image(task["Foto_Bytes"])
-                            st.download_button(
-                                label="📥 Scarica Foto",
-                                data=task["Foto_Bytes"],
-                                file_name=f"task_{tid}.png",
-                                mime="image/png",
-                                key=f"dl_{tid}",
-                                use_container_width=True
-                            )
+                            st.download_button("📥 Scarica Foto", task["Foto_Bytes"], f"task_{tid}.png", "image/png", key=f"dl_{tid}", use_container_width=True)
                         else:
-                            st.info("Nessuna immagine")
+                            st.info("Nessuna foto")
                     
                     st.divider()
                     ca1, ca2 = st.columns([2, 1])
                     if task["Stato"] != "🟢 Completato":
-                        user = ca1.selectbox("Chi completa?", team_list, key=f"u_{tid}")
-                        if ca2.button("✅ Segna come Fatto", key=f"f_{tid}", use_container_width=True):
+                        user = ca1.selectbox("Chi?", team_list, key=f"u_{tid}")
+                        if ca2.button("✅ Fatto", key=f"f_{tid}", use_container_width=True):
                             run_query("UPDATE tasks SET Stato='🟢 Completato', Completato_da=?, Data_Fine=? WHERE ID=?", 
                                      (user, datetime.now().strftime("%d/%m %H:%M"), tid))
                             st.rerun()
                     else:
-                        st.success(f"Completato da {task['Completato_da']} il {task['Data_Fine']}")
+                        st.success(f"Fatto da {task['Completato_da']}")
     else:
-        st.info("Nessun task in programma.")
+        st.info("Nessun task presente.")
 
 with tab2:
     st.subheader("Configurazione")
     col1, col2 = st.columns(2)
     with col1:
-        membro = st.text_input("Nuovo membro Team:")
+        membro = st.text_input("Membro Team:")
         if st.button("Aggiungi"):
-            if membro:
-                run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (membro,))
-                st.rerun()
-        st.write("Team:", team_list)
+            if membro: run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (membro,))
+            st.rerun()
+        st.write(team_list)
     with col2:
-        canale = st.text_input("Nuovo Canale:")
+        canale = st.text_input("Canale:")
         if st.button("Aggiungi Canale"):
-            if canale:
-                run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (canale,))
-                st.rerun()
-        st.write("Canali:", canali_list)
+            if canale: run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (canale,))
+            st.rerun()
+        st.write(canali_list)
