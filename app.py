@@ -21,7 +21,6 @@ def get_all_data():
         df_t = pd.read_sql_query("SELECT * FROM tasks ORDER BY Data_Prevista ASC", conn)
         df_team = pd.read_sql_query("SELECT nome FROM team", conn)
         df_canali = pd.read_sql_query("SELECT nome FROM canali", conn)
-    # Default se vuoti
     t_list = df_team["nome"].tolist() if not df_team.empty else ["Membro 1"]
     c_list = df_canali["nome"].tolist() if not df_canali.empty else ["Instagram"]
     return df_t, t_list, c_list
@@ -33,7 +32,7 @@ def get_image_base64(image_bytes):
 
 df_task, team_list, canali_list = get_all_data()
 
-# --- SIDEBAR (RIPRISTINATA) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("🚀 Nuovo Piano")
     titolo = st.text_input("Titolo *")
@@ -58,7 +57,7 @@ with st.sidebar:
                 curr += timedelta(days=freq)
             st.rerun()
 
-# --- TABELLA PRINCIPALE ---
+# --- CONTENUTO PRINCIPALE ---
 st.title("📅 Social Task Manager Pro")
 tab1, tab2 = st.tabs(["📋 Elenco Task", "⚙️ Configurazione"])
 
@@ -68,6 +67,7 @@ with tab1:
         if 'page' not in st.session_state: st.session_state.page = 1
         per_page = 10
         total_p = math.ceil(len(df_task) / per_page)
+        
         start = (st.session_state.page - 1) * per_page
         df_page = df_task.iloc[start:start+per_page].copy()
 
@@ -75,6 +75,7 @@ with tab1:
         df_page['Foto'] = df_page['Foto_Bytes'].apply(get_image_base64)
         df_page.insert(0, "📂", False)
         
+        # Editor Tabella
         edited = st.data_editor(
             df_page[["📂", "Foto", "Titolo", "Data", "Stato"]],
             column_config={
@@ -85,7 +86,7 @@ with tab1:
             hide_index=True, use_container_width=True, key="main_task_editor", row_height=35
         )
 
-        # Navigazione (Stile immagine)
+        # Navigazione Pagine
         cp1, cp2, cp3, cp4, cp5 = st.columns([2, 1, 1, 1, 2])
         with cp2:
             if st.button("❮", disabled=(st.session_state.page == 1)):
@@ -98,7 +99,7 @@ with tab1:
                 st.session_state.page += 1
                 st.rerun()
 
-        # Dettagli
+        # Dettagli Task selezionato
         selection = edited[edited["📂"] == True]
         if not selection.empty:
             for idx in selection.index:
@@ -107,7 +108,6 @@ with tab1:
                 with st.expander(f"⚙️ GESTIONE: {task['Titolo']}", expanded=True):
                     col_l, col_r = st.columns([3, 1.5])
                     with col_l:
-                        # Gestione Link sicura
                         raw_link = str(task["Link"]) if task["Link"] else ""
                         if raw_link.startswith("http"):
                             st.link_button("🚀 Vai al Link", raw_link, use_container_width=True)
@@ -119,10 +119,9 @@ with tab1:
                             run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_t, tid))
                             st.rerun()
                         
-                        # ELIMINAZIONE
+                        # ELIMINAZIONE CORRETTA
                         if b2.button("🗑️ ELIMINA", key=f"del_{tid}", use_container_width=True):
                             run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
-                            st.session_state.main_task_editor = None # Reset editor per forzare pulizia
                             st.rerun()
 
                     with col_r:
