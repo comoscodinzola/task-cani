@@ -16,31 +16,40 @@ if 'team' not in st.session_state:
 if 'canali_opzioni' not in st.session_state:
     st.session_state.canali_opzioni = ["Facebook", "Instagram", "Stato WhatsApp", "Gruppi WhatsApp"]
 
-# --- FUNZIONI DI SERVIZIO ---
+# --- FUNZIONE DI GENERAZIONE E RESET ---
 def genera_e_reset():
+    # Recupero dati
     testo = st.session_state.input_testo
-    canali = st.session_state.input_canali
-    foto = st.session_state.input_foto
+    inizio = st.session_state.input_data_inizio
+    fine = st.session_state.input_data_fine
+    frequenza = st.session_state.input_frequenza
     assegnati = st.session_state.input_assegnati
     
-    if not testo or not canali:
-        st.error("Inserisci almeno il testo e un canale!")
+    # Campi opzionali
+    canali = st.session_state.input_canali
+    foto = st.session_state.input_foto
+
+    # --- CONTROLLO CAMPI OBBLIGATORI ---
+    errori = []
+    if not testo.strip(): errori.append("Testo del Post")
+    if not assegnati: errori.append("Assegna a (almeno una persona)")
+    if inizio > fine: errori.append("La data di inizio deve essere precedente alla fine")
+    
+    if errori:
+        st.error(f"⚠️ Campi obbligatori mancanti o errati: {', '.join(errori)}")
         return
 
+    # Se i controlli passano, procediamo
     nuovi_task = []
-    current_date = st.session_state.input_data_inizio
-    data_fine = st.session_state.input_data_fine
-    frequenza = st.session_state.input_frequenza
-    
     foto_bytes = foto.getvalue() if foto else None
     foto_nome = foto.name if foto else "Nessuna foto"
-    canali_str = ", ".join(canali)
+    canali_str = ", ".join(canali) if canali else "Nessun canale"
     persone_str = ", ".join(assegnati)
     
     start_id = st.session_state.db_task["ID"].max() + 1 if not st.session_state.db_task.empty else 1
     
-    temp_date = current_date
-    while temp_date <= data_fine:
+    temp_date = inizio
+    while temp_date <= fine:
         nuovi_task.append({
             "ID": int(start_id),
             "Data Prevista": temp_date,
@@ -57,6 +66,8 @@ def genera_e_reset():
         start_id += 1
     
     st.session_state.db_task = pd.concat([st.session_state.db_task, pd.DataFrame(nuovi_task)], ignore_index=True)
+    
+    # Reset Campi
     st.session_state.input_testo = ""
     st.session_state.input_canali = []
     st.session_state.input_assegnati = []
@@ -67,17 +78,16 @@ st.title("📅 Programmatore Task & Post")
 # --- SIDEBAR: CREAZIONE ---
 st.sidebar.header("🚀 Crea Nuovo Piano")
 
-st.sidebar.text_area("Testo del Post", key="input_testo")
-st.sidebar.file_uploader("Carica Foto", type=['png', 'jpg', 'jpeg'], key="input_foto")
+st.sidebar.text_area("Testo del Post *", key="input_testo", help="Obbligatorio")
+st.sidebar.file_uploader("Carica Foto (Opzionale)", type=['png', 'jpg', 'jpeg'], key="input_foto")
 
-# Canali dinamici presi dallo session_state
-st.sidebar.multiselect("Canali di pubblicazione:", st.session_state.canali_opzioni, key="input_canali")
+st.sidebar.multiselect("Canali di pubblicazione (Opzionale):", st.session_state.canali_opzioni, key="input_canali")
 
-st.sidebar.date_input("Inizio", datetime.now(), key="input_data_inizio")
-st.sidebar.date_input("Fine", datetime.now() + timedelta(days=30), key="input_data_fine")
-st.sidebar.number_input("Ogni quanti giorni?", min_value=1, value=7, key="input_frequenza")
+st.sidebar.date_input("Inizio *", datetime.now(), key="input_data_inizio")
+st.sidebar.date_input("Fine *", datetime.now() + timedelta(days=30), key="input_data_fine")
+st.sidebar.number_input("Ogni quanti giorni? *", min_value=1, value=7, key="input_frequenza")
 
-st.sidebar.multiselect("Assegna a:", st.session_state.team, key="input_assegnati")
+st.sidebar.multiselect("Assegna a: *", st.session_state.team, key="input_assegnati", help="Obbligatorio")
 
 st.sidebar.button("Genera Piano Editoriale", on_click=genera_e_reset)
 
@@ -123,7 +133,6 @@ with tab1:
 
 with tab2:
     col1, col2 = st.columns(2)
-    
     with col1:
         st.header("👥 Team")
         nuovo_membro = st.text_input("Nome nuovo collaboratore:", key="new_mem")
@@ -131,7 +140,6 @@ with tab2:
             if nuovo_membro and nuovo_membro not in st.session_state.team:
                 st.session_state.team.append(nuovo_membro)
                 st.rerun()
-        
         for m in st.session_state.team:
             ca, cb = st.columns([3, 1])
             ca.write(f"- {m}")
@@ -141,12 +149,11 @@ with tab2:
 
     with col2:
         st.header("📢 Canali")
-        nuovo_canale = st.text_input("Nome nuovo canale (es. TikTok):", key="new_chan")
+        nuovo_canale = st.text_input("Nome nuovo canale:", key="new_chan")
         if st.button("Aggiungi Canale"):
             if nuovo_canale and nuovo_canale not in st.session_state.canali_opzioni:
                 st.session_state.canali_opzioni.append(nuovo_canale)
                 st.rerun()
-        
         for c in st.session_state.canali_opzioni:
             ca, cb = st.columns([3, 1])
             ca.write(f"- {c}")
