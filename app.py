@@ -32,29 +32,29 @@ def get_image_base64(image_bytes):
 
 df_task, team_list, canali_list = get_all_data()
 
-# --- SIDEBAR ---
+# --- SIDEBAR: INSERIMENTO ---
 with st.sidebar:
     st.header("🚀 Nuovo Piano")
-    titolo = st.text_input("Titolo *")
-    testo = st.text_area("Testo Post *")
-    link_input = st.text_input("Link (inizia con http://)")
-    foto = st.file_uploader("Immagine", type=['png', 'jpg', 'jpeg'])
+    titolo_in = st.text_input("Titolo *")
+    testo_in = st.text_area("Testo Post *")
+    link_in = st.text_input("Link (es. https://...)")
+    foto_in = st.file_uploader("Immagine", type=['png', 'jpg', 'jpeg'])
     canali_sel = st.multiselect("Canali:", canali_list)
-    data_in = st.date_input("Inizio", datetime.now())
-    data_fi = st.date_input("Fine", datetime.now() + timedelta(days=7))
-    freq = st.number_input("Ogni quanti giorni?", min_value=1, value=1)
-    assegnati = st.multiselect("Assegna a:", team_list)
+    data_inizio = st.date_input("Inizio", datetime.now())
+    data_fine = st.date_input("Fine", datetime.now() + timedelta(days=7))
+    frequenza = st.number_input("Ogni quanti giorni?", min_value=1, value=1)
+    assegnati_a = st.multiselect("Assegna a:", team_list)
     
     if st.button("Genera Piano", type="primary", use_container_width=True):
-        if titolo and testo:
-            curr = data_in
-            while curr <= data_fi:
+        if titolo_in and testo_in:
+            curr = data_inizio
+            while curr <= data_fine:
                 run_query('''INSERT INTO tasks (Titolo, Data_Prevista, Canali, Contenuto, Link, Foto_Nome, Foto_Bytes, Assegnato_a, Stato, Completato_da, Data_Fine) 
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                          (titolo, curr.strftime("%Y-%m-%d"), ", ".join(canali_sel), testo, link_input, 
-                           foto.name if foto else "", foto.getvalue() if foto else None,
-                           ", ".join(assegnati), "🔴 Da fare", "-", "-"))
-                curr += timedelta(days=freq)
+                          (titolo_in, curr.strftime("%Y-%m-%d"), ", ".join(canali_sel), testo_in, link_in, 
+                           foto_in.name if foto_in else "", foto_in.getvalue() if foto_in else None,
+                           ", ".join(assegnati_a), "🔴 Da fare", "-", "-"))
+                curr += timedelta(days=frequenza)
             st.rerun()
 
 # --- CONTENUTO PRINCIPALE ---
@@ -67,7 +67,6 @@ with tab1:
         if 'page' not in st.session_state: st.session_state.page = 1
         per_page = 10
         total_p = math.ceil(len(df_task) / per_page)
-        
         start = (st.session_state.page - 1) * per_page
         df_page = df_task.iloc[start:start+per_page].copy()
 
@@ -75,7 +74,6 @@ with tab1:
         df_page['Foto'] = df_page['Foto_Bytes'].apply(get_image_base64)
         df_page.insert(0, "📂", False)
         
-        # Editor Tabella
         edited = st.data_editor(
             df_page[["📂", "Foto", "Titolo", "Data", "Stato"]],
             column_config={
@@ -99,7 +97,7 @@ with tab1:
                 st.session_state.page += 1
                 st.rerun()
 
-        # Dettagli Task selezionato
+        # Dettagli Task
         selection = edited[edited["📂"] == True]
         if not selection.empty:
             for idx in selection.index:
@@ -108,41 +106,63 @@ with tab1:
                 with st.expander(f"⚙️ GESTIONE: {task['Titolo']}", expanded=True):
                     col_l, col_r = st.columns([3, 1.5])
                     with col_l:
+                        # Gestione Link
                         raw_link = str(task["Link"]) if task["Link"] else ""
                         if raw_link.startswith("http"):
                             st.link_button("🚀 Vai al Link", raw_link, use_container_width=True)
                         
-                        new_t = st.text_area("Contenuto:", value=task["Contenuto"], key=f"t_{tid}")
+                        new_testo = st.text_area("Contenuto:", value=task["Contenuto"], key=f"t_{tid}")
                         
                         b1, b2 = st.columns(2)
-                        if b1.button("💾 Salva", key=f"s_{tid}", type="primary", use_container_width=True):
-                            run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_t, tid))
+                        if b1.button("💾 Salva Modifiche", key=f"s_{tid}", type="primary", use_container_width=True):
+                            run_query("UPDATE tasks SET Contenuto = ? WHERE ID = ?", (new_testo, tid))
                             st.rerun()
                         
-                        # ELIMINAZIONE CORRETTA
-                        if b2.button("🗑️ ELIMINA", key=f"del_{tid}", use_container_width=True):
+                        if b2.button("🗑️ ELIMINA RECORD", key=f"del_{tid}", use_container_width=True):
                             run_query("DELETE FROM tasks WHERE ID = ?", (tid,))
                             st.rerun()
 
                     with col_r:
                         if task["Foto_Bytes"]:
                             st.image(task["Foto_Bytes"])
-                            st.download_button("📥 Scarica", task["Foto_Bytes"], f"f_{tid}.png", key=f"dl_{tid}")
+                            st.download_button("📥 Scarica", task["Foto_Bytes"], f"f_{tid}.png", key=f"dl_{tid}", use_container_width=True)
     else:
-        st.info("Nessun task.")
+        st.info("Nessun task in archivio.")
 
 with tab2:
-    st.subheader("Configurazione")
-    c1, c2 = st.columns(2)
-    with c1:
+    st.subheader("Configurazione Team e Canali")
+    cl1, cl2 = st.columns(2)
+    with cl1:
         m_in = st.text_input("Nuovo Membro:")
         if st.button("Aggiungi Membro"):
             if m_in: run_query("INSERT OR IGNORE INTO team (nome) VALUES (?)", (m_in,))
             st.rerun()
+        st.write("**Team attuale:**")
         for m in team_list: st.text(f"• {m}")
-    with c2:
+            
+    with cl2:
         c_in = st.text_input("Nuovo Canale:")
         if st.button("Aggiungi Canale"):
             if c_in: run_query("INSERT OR IGNORE INTO canali (nome) VALUES (?)", (c_in,))
             st.rerun()
+        st.write("**Canali attuali:**")
         for c in canali_list: st.text(f"• {c}")
+
+    st.divider()
+    st.subheader("🗑️ Pulizia Massiva")
+    titolo_da_eliminare = st.text_input("Inserisci il Titolo esatto dei task da rimuovere:")
+    if st.button("Togli dal DB record con questo Titolo", type="secondary", use_container_width=True):
+        if titolo_da_eliminare:
+            with sqlite3.connect(DB_NAME) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM tasks WHERE Titolo = ?", (titolo_da_eliminare,))
+                count = cursor.fetchone()[0]
+                if count > 0:
+                    cursor.execute("DELETE FROM tasks WHERE Titolo = ?", (titolo_da_eliminare,))
+                    conn.commit()
+                    st.success(f"Eliminati correttamente {count} record.")
+                    st.rerun()
+                else:
+                    st.warning("Nessun record trovato con questo titolo.")
+        else:
+            st.error("Scrivi un titolo per procedere.")
